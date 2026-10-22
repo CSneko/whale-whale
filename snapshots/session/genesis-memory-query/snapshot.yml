@@ -1,0 +1,8 @@
+version: 1
+scenario: genesis-memory-query
+profile: headless
+composition: genesis-memory-query
+recording: authored
+header:
+  class: genesis-memory-query
+  pin: true

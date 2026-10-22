@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for roadmap.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/genesis/roadmap.md
+/genesis-next-steps:
+  en: 8d2aa27c86228a58
+  zh: 4256a169ea87523d
+/genesis-next-steps/summary:
+  en: 3aa370c94a0312d2
+  zh: f46b98132bcfcb92
+/genesis-next-steps/priorities:
+  en: 639b0b9b580b47cd
+  zh: 5c6a0b4e76601ba9
+/genesis-next-steps/later-phases:
+  en: 7fc144ef2975f45d
+  zh: d637bdebef999312
+/genesis-next-steps/dev-note:
+  en: b75c8458928b72b9
+  zh: 45e76642489dcc3c

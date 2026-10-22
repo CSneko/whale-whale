@@ -1,0 +1,7 @@
+# Bilingual-pair consistency record for genesis.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/subsystems/genesis.md
+/genesis-life-services:
+  en: 348e764489780fd7
+  zh: 6b939e1bad441299

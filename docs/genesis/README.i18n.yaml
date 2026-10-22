@@ -1,0 +1,25 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/genesis/README.md
+/genesis-phase-1:
+  en: 80c24d5cff19d23d
+  zh: ca92e926b519fd1b
+/genesis-phase-1/summary:
+  en: b24c8ade766ad4b6
+  zh: 1ac0f17bb05de9db
+/genesis-phase-1/contents:
+  en: 8c2468b5e0ff5e5d
+  zh: 61d9221ef8a31cf3
+/genesis-phase-1/run-from-this-workspace:
+  en: b0199ddc08ccfbd7
+  zh: 7c97b60f9bb47abc
+/genesis-phase-1/inspect-and-remember:
+  en: d302e4111a2755ea
+  zh: 6934caaa3f987a07
+/genesis-phase-1/limits:
+  en: 2fe540c4deafd081
+  zh: e1ac1cf0609c3fc5
+/genesis-phase-1/dev-note:
+  en: b75c8458928b72b9
+  zh: 45e76642489dcc3c

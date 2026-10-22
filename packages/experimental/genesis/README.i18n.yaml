@@ -1,0 +1,64 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/experimental/genesis/README.md
+/:
+  en: 7d92173074c0722a
+  zh: 20dca095be1790b4
+/deepseek-ai-dsh-experimental-genesis:
+  en: 53217636f3e488a3
+  zh: 2504567d6e70473f
+/deepseek-ai-dsh-experimental-genesis/summary:
+  en: 6a68ce247c689532
+  zh: 09254a4644a57363
+/deepseek-ai-dsh-experimental-genesis/table-of-contents:
+  en: bf9fa3f38eff405d
+  zh: eb85db0a9bc40fc0
+/deepseek-ai-dsh-experimental-genesis/use:
+  en: 32366b71a4f0b5b8
+  zh: 767bc74bd2ee1cca
+/deepseek-ai-dsh-experimental-genesis/configuration:
+  en: 69504e57cd1f5250
+  zh: b5b5c24228b4889b
+/deepseek-ai-dsh-experimental-genesis/implementation:
+  en: 1cfc42384ba354af
+  zh: fdec96b1922fa698
+/deepseek-ai-dsh-experimental-genesis/further-exploration:
+  en: b23c2c9b91f5c429
+  zh: 995a9538700c1c85
+/deepseek-ai-dsh-experimental-genesis/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/deepseek-ai-dsh-experimental-genesis/model-experience/identity-guidance:
+  en: c49eb9fdd8cada39
+  zh: 0201ccf8a185d623
+/deepseek-ai-dsh-experimental-genesis/model-experience/identity-guidance/what-the-model-sees:
+  en: 70907e3561d1ad50
+  zh: e6af5d7ad3f5926b
+/deepseek-ai-dsh-experimental-genesis/model-experience/identity-guidance/what-the-model-sees/verbatim-guidance:
+  en: ee8865eda3bcc252
+  zh: ab62c488b81a55dc
+/deepseek-ai-dsh-experimental-genesis/model-experience/identity-guidance/token-effect:
+  en: 31d77256385c7e87
+  zh: 0e76c031b06d3bb4
+/deepseek-ai-dsh-experimental-genesis/model-experience/identity-guidance/kv-cache-effect:
+  en: 2a00bcc45bf65c4a
+  zh: 64070c05fbac7e79
+/deepseek-ai-dsh-experimental-genesis/model-experience/native-tools:
+  en: 5a2464cbaf0bf121
+  zh: c82fb049a2111e83
+/deepseek-ai-dsh-experimental-genesis/model-experience/native-tools/what-the-model-sees:
+  en: 253e0ab90c1f6585
+  zh: f2615c2bb9dae860
+/deepseek-ai-dsh-experimental-genesis/model-experience/native-tools/token-effect:
+  en: 8056df4a68d28758
+  zh: 4fe1aa4296cfc24d
+/deepseek-ai-dsh-experimental-genesis/model-experience/native-tools/kv-cache-effect:
+  en: f3cdc177843abe39
+  zh: 43780d7b8cf88c94
+/deepseek-ai-dsh-experimental-genesis/known-limitations-and-deferred-work:
+  en: fde23030648a713b
+  zh: 4393c702ec0a41ae
+/deepseek-ai-dsh-experimental-genesis/known-limitations-and-deferred-work/dev-note:
+  en: 0a1253c6f7b5e8b9
+  zh: 9f56528562c7c914

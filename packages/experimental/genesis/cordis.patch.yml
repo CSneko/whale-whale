@@ -1,0 +1,7 @@
+# Explicit source-workspace opt-in. All Genesis data lives under this DSH_HOME.
+# Use a dedicated DSH_HOME to isolate experiments from ordinary Harness data.
+- insert:
+    - id: genesis
+      name: '@deepseek-ai/dsh-experimental-genesis'
+      config:
+        leasePath: !!js dshHomePath('genesis.writer.lock')
