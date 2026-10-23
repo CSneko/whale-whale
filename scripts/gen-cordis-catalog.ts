@@ -293,6 +293,8 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   MemoryId: '../genesis/data-model.md',
   ObservedInteraction: '../genesis/data-model.md',
   MemoryQuery: '../genesis/data-model.md',
+  MemoryChange: '../genesis/memory.md',
+  MemoryEmbedding: '../genesis/memory.md',
   EventQuery: '../genesis/data-model.md',
   LifeStatus: '../genesis/data-model.md',
 

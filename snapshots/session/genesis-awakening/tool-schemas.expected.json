@@ -1,0 +1,64 @@
+{
+  "initial": [
+    {
+      "name": "learn",
+      "description": "学习：学习一个指定名称的工具。传入准确的工具名称，每次只学习一个。学习不代表获得执行权限。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "要学习的工具的准确名称。"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    }
+  ],
+  "changes": [
+    [
+      {
+        "name": "genesis_recall",
+        "description": "Search persistent sourced candidate memories across Sessions. Provide a meaningful nonempty query for semantic recall when the memory pipeline is enabled. Source event ids allow evidence inspection.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            },
+            "category": {
+              "type": "string",
+              "enum": [
+                "episodic",
+                "semantic",
+                "self",
+                "procedural"
+              ]
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      },
+      {
+        "name": "learn",
+        "description": "学习：学习一个指定名称的工具。传入准确的工具名称，每次只学习一个。学习不代表获得执行权限。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "要学习的工具的准确名称。"
+            }
+          },
+          "required": [
+            "name"
+          ]
+        }
+      }
+    ]
+  ]
+}

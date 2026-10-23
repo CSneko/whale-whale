@@ -1223,6 +1223,30 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'Detached life snapshot; rejects when closed or storage is untrusted.',
       },
       {
+        signature: 'learningStatus(): { ready: boolean; tools: string[]; firstSessionId?: SessionId }',
+        description: 'Read committed naming, learned tools and the first conversation, without copying another Session\'s context.',
+        parameters: [],
+        returns: 'Detached global life progress; an untrusted or closed core rejects.',
+      },
+      {
+        signature: 'awaken(name: string): Promise<void>',
+        description: 'Name the existing life once after the application has checked model configuration; never create a second identity.',
+        parameters: [{ name: 'name', description: 'User-selected name, validated before storage admission.' }],
+        returns: 'After naming commits; repeating the same name is idempotent and a conflicting name is refused.',
+      },
+      {
+        signature: 'beginConversation(sessionId: SessionId): Promise<void>',
+        description: 'Bind the first accepted conversation once; subsequent Sessions retain their own context.',
+        parameters: [{ name: 'sessionId', description: 'Session receiving an actual first user input.' }],
+        returns: 'After the first-conversation fact commits, or after an idempotent repeat.',
+      },
+      {
+        signature: 'learn(tool: string, sessionId: SessionId): Promise<void>',
+        description: 'Persist one tool-learning event, independently of availability and execution permissions.',
+        parameters: [{ name: 'tool', description: 'Exact current tool name checked by the learning tool against the caller\'s registry.' }, { name: 'sessionId', description: 'Actual learning Session.' }],
+        returns: 'After learning and its growth record commit together; repeats do not duplicate them.',
+      },
+      {
         signature: 'observe(observation: ObservedInteraction): Promise<LifeEvent>',
         description: 'Append an attributed fact once, identified by Session plus durable sequence.',
         parameters: [{ name: 'observation', description: 'Actual Session event metadata, never a model assertion.' }],
@@ -1271,6 +1295,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'A detached memory or undefined if absent or deleted.',
       },
       {
+        signature: 'reviewMemory(key: string, changes: MemoryChange[], maxImplicit: number): Promise<void>',
+        description: 'Atomically apply an independent writer\'s changes and record a completed review once.',
+        parameters: [{ name: 'key', description: 'Stable source turn or explicit user-memory request key.' }, { name: 'changes', description: 'Validated changes; all references must belong to this life.' }, { name: 'maxImplicit', description: 'Whole-life non-declarative record limit.' }],
+        returns: 'After all changes and the replay marker commit, or no-op on replay.',
+      },
+      {
         signature: 'async retrieve(query: MemoryQuery): Promise<LifeMemory[]>',
         description: 'Retrieve lexical memories by category, time, importance and recency.',
         parameters: [{ name: 'query', description: 'Explicit result and character bounds.' }],
@@ -1292,9 +1322,15 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
   },
   {
     key: 'genesisStatus',
-    summary: 'Read current Genesis state without exposing a remote identity or permission writer.',
-    description: 'Read current Genesis state without exposing a remote identity or permission writer.',
+    summary: 'Sample shared life state and initialize its name without changing its identity or permissions.',
+    description: 'Sample shared life state and initialize its name without changing its identity or permissions.',
     methods: [
+      {
+        signature: '@Remote(\'initialize\') async initialize(name: string, signal: AbortSignal): Promise<void>',
+        description: 'Check configured chat/reviewer/writer routes and the embedding service, then name this existing life once. Credentials use the existing provider settings or account sign-in; no secrets are accepted or stored here.',
+        parameters: [{ name: 'name', description: 'User-chosen name, retained across Sessions and restarts.' }, { name: 'signal', description: 'Caller cancellation; an admitted storage commit may still finish after cancellation.' }],
+        returns: 'After naming commits; errors leave initialization pending unless a storage write has uncertain outcome.',
+      },
       {
         signature: '@Remote(\'inspect\') async inspect(signal: AbortSignal): Promise<LifeStatus>',
         description: 'Sample live tools, identity, counts and bounded memory/growth previews. Historical scopes are excluded from current availability. Errors reject; callers keep their previous sample visibly stale and offer retry.',
@@ -6025,7 +6061,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'LifeStatus',
-    declaration: 'export interface LifeStatus {\n    identity: LifeIdentity;\n    sampledAt: string;\n    runtime: {\n        platform: string;\n        node: string;\n        liveSessions: number;\n    };\n    counts: {\n        events: number;\n        memories: number;\n        growth: number;\n    };\n    capabilities: Array<{\n        sessionId: SessionId;\n        capability: CapabilityState;\n    }>;\n    memories: LifeMemory[];\n    growth: GrowthRecord[];\n    omitted: {\n        capabilities: number;\n        memories: number;\n        growth: number;\n    };\n}',
+    declaration: 'export interface LifeStatus {\n    setup?: {\n        phase: \'credentials\' | \'naming\' | \'ready\';\n    };\n    identity: LifeIdentity;\n    sampledAt: string;\n    runtime: {\n        platform: string;\n        node: string;\n        liveSessions: number;\n    };\n    counts: {\n        events: number;\n        memories: number;\n        growth: number;\n    };\n    capabilities: Array<{\n        sessionId: SessionId;\n        capability: CapabilityState;\n    }>;\n    memories: LifeMemory[];\n    growth: GrowthRecord[];\n    omitted: {\n        capabilities: number;\n        memories: number;\n        growth: number;\n    };\n}',
   },
   {
     name: 'LlmAdapter',
@@ -6252,6 +6288,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type McpResourceRequest = {\n    method: \'resources/list\' | \'resources/templates/list\';\n    cursor?: string;\n} | {\n    method: \'resources/read\';\n    uri: string;\n};',
   },
   {
+    name: 'MemoryChange',
+    declaration: 'export type MemoryChange = {\n    action: \'delete\';\n    id: MemoryId;\n} | {\n    action: \'upsert\';\n    id?: MemoryId;\n    input: MemoryInput;\n    embedding: MemoryEmbedding;\n};',
+  },
+  {
+    name: 'MemoryEmbedding',
+    declaration: 'export type MemoryEmbedding = z.infer<typeof embeddingSchema>;',
+  },
+  {
     name: 'MemoryId',
     declaration: 'export type MemoryId = Branded<\'GenesisMemoryId\'>;',
   },
@@ -6433,7 +6477,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ObservedInteraction',
-    declaration: 'export interface ObservedInteraction {\n    sessionId: SessionId;\n    eventId: string;\n    timestamp: string;\n    kind: \'user-message\' | \'tool-result\';\n    tool?: string;\n    success?: boolean;\n}',
+    declaration: 'export interface ObservedInteraction {\n    sessionId: SessionId;\n    eventId: string;\n    timestamp: string;\n    kind: \'user-message\' | \'assistant-message\' | \'tool-result\';\n    tool?: string;\n    success?: boolean;\n}',
   },
   {
     name: 'OfficeExtension',

@@ -153,7 +153,7 @@
     },
     {
       "name": "genesis_recall",
-      "description": "Search persistent sourced candidate memories across Sessions. Empty query lists important recent memories; source event ids allow evidence inspection.",
+      "description": "Search persistent sourced candidate memories across Sessions. Provide a meaningful nonempty query for semantic recall when the memory pipeline is enabled. Source event ids allow evidence inspection.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -177,7 +177,7 @@
     },
     {
       "name": "genesis_remember",
-      "description": "Save a candidate memory only when the user explicitly asks to remember it. Evidence is taken from the latest matching user message in this Session. Content must occur verbatim in that message. This does not establish truth or change identity or capabilities.",
+      "description": "Request a candidate memory only when the user explicitly asks to remember it. Content must occur verbatim in the latest matching user message in this Session. With the memory pipeline enabled, the independent reviewer and writer decide and commit after the reply; a pending request is not a saved memory. Otherwise the sourced candidate is saved directly. This does not establish truth or change identity or capabilities.",
       "parameters": {
         "type": "object",
         "properties": {

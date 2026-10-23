@@ -1,12 +1,17 @@
-/** Read-only Genesis state inside the established General settings column. @module */
+/** Sampled Genesis state and pending first-run naming in General settings. @module */
 import { useId } from 'react'
 import { Button, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsRuntime, PropsLocale, InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-resources/client'
 import css from './StatusPanel.module.css'
+import { NamingForm } from './Awakening.tsx'
 
 /** Explicit user refresh action supplied by the registering plugin. */
-export interface StatusActions { refresh(this: void): void }
+export interface StatusActions {
+  refresh(this: void): void
+  /** Checks model and embedding configuration before naming the existing life. */
+  initialize(this: void, name: string, signal: AbortSignal): Promise<boolean>
+}
 /** Derived General-settings slot shares, locale and resource seat. */
 export type StatusPanelProps = PropsRuntime<'settings.general.item'> & PropsLocale<'genesis'> & InjectFace<StatusActions>
 
@@ -15,7 +20,7 @@ export type StatusPanelProps = PropsRuntime<'settings.general.item'> & PropsLoca
  * @param props - Framework resource hook, refresh action and typed dictionaries.
  * @returns Accessible, wrapping status section retaining its last sample on failure.
  */
-export function StatusPanel({ useResource, refresh, t }: StatusPanelProps) {
+export function StatusPanel({ useResource, refresh, initialize, t }: StatusPanelProps) {
   const heading = useId()
   const resource = useResource<'genesis'>('dsh-resource://genesis/status')
   const status = resource.value
@@ -30,6 +35,8 @@ export function StatusPanel({ useResource, refresh, t }: StatusPanelProps) {
     {resource.status === 'failed' ? <p role="alert" className={css.notice}>{t('failed')}</p> : null}
     {resource.status === 'none' ? <p role="status">{t('unavailable')}</p> : null}
     {status === undefined ? null : <>
+      {status.setup?.phase === 'credentials' ? <p role="status">{t('configureFirst')}</p> : null}
+      {status.setup?.phase === 'naming' ? <NamingForm t={t} refresh={refresh} initialize={initialize} /> : null}
       <p className={css.status}><StateDot state={resource.status === 'failed' ? 'warning' : 'done'} />
         {resource.status === 'failed' ? t('failed') : t('active')}
       </p>

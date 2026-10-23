@@ -36,8 +36,15 @@ export const memoryInputSchema = z.strictObject({
   category: z.enum(['episodic', 'semantic', 'self', 'procedural']),
   content: z.string().trim().min(1).max(8000), importance: z.number().min(0).max(1),
   sourceEventIds: z.array(eventId).min(1).max(100), confidence: z.number().min(0).max(1),
+  kind: z.enum(['declarative', 'non-declarative']).optional(),
+  attribution: z.enum(['user-stated', 'model-inference']).optional(),
 })
-const memorySchema = memoryInputSchema.extend({ id: memoryId, lifeId, createdAt: timestamp, updatedAt: timestamp })
+/** Cached semantic vector with an exact embedding-space identifier. */
+export const embeddingSchema = z.strictObject({
+  space: z.string().min(1), vector: z.array(z.number()).min(1).max(65536),
+}).refine(value => value.vector.some(component => component !== 0), 'Embedding must be nonzero')
+const memorySchema = memoryInputSchema.extend({ id: memoryId, lifeId, createdAt: timestamp, updatedAt: timestamp,
+  embedding: embeddingSchema.optional() })
 const capabilitySchema = z.strictObject({
   id: capabilityId, declarationHash: z.string(), firstSeenAt: timestamp, changedAt: timestamp,
   available: z.boolean(), permission: z.literal('checked-at-execution'),
@@ -91,6 +98,8 @@ export type LifeEvent = z.infer<typeof eventSchema>
 export type LifeMemory = z.infer<typeof memorySchema>
 /** Memory creation fields supplied by a caller. */
 export type MemoryInput = z.infer<typeof memoryInputSchema>
+/** Persisted vector cache; it can be rebuilt from the local memory text. */
+export type MemoryEmbedding = z.infer<typeof embeddingSchema>
 /** Capability availability belongs to its Session scope; permission is evaluated on execution. */
 export type CapabilityState = z.infer<typeof capabilitySchema>
 /** Persistent system growth linked to life facts. */

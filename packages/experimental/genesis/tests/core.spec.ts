@@ -32,6 +32,28 @@ async function setup(root: string, medium: 'json' | 'sqlite' = 'json', overrides
 const sessionId = SessionId('genesis-session')
 const tool = { name: 'lookup', description: 'Read a fixture', parameters: {} }
 
+it('publishes learned tools only after the complete persistence operation settles', async () => {
+  const fixture = await setup(await directory())
+  await fixture.core.awaken('小芽')
+  const table = fixture.domain.table('states')
+  const put = table.put.bind(table)
+  const entered = Promise.withResolvers<undefined>()
+  const release = Promise.withResolvers<undefined>()
+  vi.spyOn(table, 'put').mockImplementationOnce(async (...args) => {
+    await put(...args)
+    entered.resolve(undefined)
+    await release.promise
+  })
+  const learning = fixture.core.learn('lookup', sessionId)
+  try {
+    await entered.promise
+    expect(table.get('life')?.events.some(event => event.type === 'capability.learned')).toBe(true)
+    expect(fixture.core.learningStatus().tools).toEqual([])
+  } finally { release.resolve(undefined) }
+  await learning
+  expect(fixture.core.learningStatus().tools).toEqual(['lookup'])
+})
+
 describe.each(['json', 'sqlite'] as const)('%s life persistence', (medium) => {
   it('commits one birth and restores identity, memories, sources and growth across restart', async () => {
     const root = await directory()
@@ -160,4 +182,38 @@ it('refuses capacity overflow without discarding history or poisoning reads', as
   await expect(core.scan(sessionId, Array.from({ length: 10 }, (_, index) => ({ ...tool, name: `tool${index}` })))).rejects.toMatchObject({ code: 'capacity' })
   expect((await core.snapshot()).sessions).toEqual({})
   expect(boundedJson({ content: 'a'.repeat(500) }, 100)).toBe('{"omitted":true,"reason":"context-budget"}')
+})
+
+it('keeps a local backup and refuses rebirth after the primary store disappears', async () => {
+  const root = await directory()
+  const fixture = await setup(root)
+  await fixture.close()
+  const backup = await readFile(join(root, 'life.lock.backup.json'), 'utf8')
+  expect(stateSchema.parse(JSON.parse(backup)).events.some(event => event.type === 'life.stopped')).toBe(true)
+  await rm(join(root, 'genesis.json'))
+  await expect(openCore(root)).rejects.toMatchObject({ code: 'invalid-state' })
+  expect(await readFile(join(root, 'life.lock.backup.json'), 'utf8')).toBe(backup)
+})
+
+it('commits review changes once, invalidates corrected vectors and refuses oversized implicit memory atomically', async () => {
+  const { core } = await setup(await directory())
+  const born = (await core.snapshot()).events[0]!
+  const input = { content: 'Oolong preference', category: 'semantic' as const, kind: 'declarative' as const,
+    importance: 0.8, confidence: 0.8, sourceEventIds: [born.id] }
+  const embedding = { space: 'fixture', vector: [1, 0] }
+  await core.reviewMemory('first', [{ action: 'upsert', input, embedding }], 1)
+  const committed = await core.snapshot()
+  await core.reviewMemory('first', [{ action: 'upsert', input, embedding }], 1)
+  expect(await core.snapshot()).toEqual(committed)
+  const saved = committed.memories.find(memory => memory.content === input.content)!
+  const { kind: _kind, ...implicit } = input
+  await expect(core.reviewMemory('too-many', [
+    { action: 'upsert', input: { ...implicit, kind: 'non-declarative', content: 'First habit' }, embedding },
+    { action: 'upsert', input: { ...implicit, kind: 'non-declarative', content: 'Second habit' }, embedding },
+  ], 1)).rejects.toMatchObject({ code: 'capacity' })
+  expect(await core.snapshot()).toEqual(committed)
+  await core.updateMemory(saved.id, { ...input, content: 'Corrected preference' })
+  expect((await core.getMemory(saved.id))?.embedding).toBeUndefined()
+  await core.reviewMemory('delete', [{ action: 'delete', id: saved.id }], 1)
+  expect(await core.getMemory(saved.id)).toBeUndefined()
 })

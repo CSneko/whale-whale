@@ -1050,12 +1050,23 @@ export type Config = CuaConfig
 
 ## `@deepseek-ai/dsh-experimental-genesis`
 
-- `inject`: `storageDomain` · `tools` · `systemPrompt` · `agents`
+- `inject`: `storageDomain` · `tools` · `systemPrompt` · `agents` · `llm`
 - `source`: [`packages/experimental/genesis/src/config.ts:4`](../packages/experimental/genesis/src/config.ts)
 
 ```ts config-catalog
 /** Validated, resolved Genesis plugin configuration. */
 export interface Config {
+  /** Enables naming, newborn conversations and persistent tool learning on the configured chat route. */
+  awakening?: {
+    /** Registered chat provider checked before the naming step. */
+    provider: string
+    /** Chat model identifier on the configured provider. */
+    model: string
+  } | undefined
+  /** Local atomic backup; omitted resolves beside leasePath as leasePath + '.backup.json'. */
+  backupPath?: string
+  /** Enables independent review/writing models and semantic memory search. */
+  memory?: MemoryConfig | undefined
   /** Shared exclusive lease file for all processes accessing this life domain. */
   leasePath: string
   /** Maximum retained facts, memories, growth records and scope entries; exhaustion refuses writes. */
@@ -1074,6 +1085,40 @@ export interface Config {
   resultChars: number
   /** Maximum records in a query response. */
   queryLimit: number
+}
+
+/** Explicit routes and budgets for the optional long-term memory pipeline. */
+export interface MemoryConfig {
+  /** Registered Harness provider for the update/no-update decision. */
+  decisionProvider: string
+  /** Model identifier on the decision provider. */
+  decisionModel: string
+  /** Registered Harness provider for the separate memory writer. */
+  writerProvider: string
+  /** Model identifier on the independent writer provider. */
+  writerModel: string
+  /** OpenAI-compatible embeddings endpoint, including /embeddings. */
+  embeddingUrl: string
+  /** Model identifier accepted by the embedding endpoint. */
+  embeddingModel: string
+  /** Environment variable holding the embeddings credential; omitted for keyless local servers. */
+  embeddingKeyEnv?: string
+  /** Exact vector length requested and validated on every embedding response. */
+  embeddingDimensions: number
+  /** Deadline per review or recall, including model calls and embeddings. */
+  timeoutMs: number
+  /** Complete serialized auxiliary input and single embedding input character limit. */
+  inputChars: number
+  /** Auxiliary model response character limit; also bounds embedding-response metadata. */
+  outputChars: number
+  /** Output token limit for each decision or writer call. */
+  maxTokens: number
+  /** Maximum changes in one atomic writer plan. */
+  maxChanges: number
+  /** Whole-life count limit for the small prompt-resident memory layer. */
+  maxImplicitMemories: number
+  /** Minimum cosine similarity admitted into semantic recall results. */
+  minSimilarity: number
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-experimental-genesis -->

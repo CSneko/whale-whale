@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for 2026-10-23-genesis-first-awakening.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-10-23-genesis-first-awakening.md
+/agent-note-one-genesis-character-with-explicit-tool-learning:
+  en: 6cffa380566279e9
+  zh: c1355eb5ee5ba8a9
+/agent-note-one-genesis-character-with-explicit-tool-learning/problem:
+  en: 351f7697411b5336
+  zh: 9af583378baa9852
+/agent-note-one-genesis-character-with-explicit-tool-learning/decision:
+  en: c579d510fecce4b7
+  zh: 989443b66c9e038b
+/agent-note-one-genesis-character-with-explicit-tool-learning/alternatives-considered:
+  en: 9197a681ac591afb
+  zh: ea53bf72966e49e3
+/agent-note-one-genesis-character-with-explicit-tool-learning/consequences:
+  en: a4e6213dc57c76f5
+  zh: 4040fc1e7f0f2fdb

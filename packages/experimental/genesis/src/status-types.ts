@@ -4,6 +4,8 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 
 /** A sampled view; historical Session observations never become current availability. */
 export interface LifeStatus {
+  /** Absent in foundation-only mode; credentials must be configured before the naming step. */
+  setup?: { phase: 'credentials' | 'naming' | 'ready' }
   identity: LifeIdentity
   sampledAt: string
   runtime: { platform: string; node: string; liveSessions: number }

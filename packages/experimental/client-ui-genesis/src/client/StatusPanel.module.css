@@ -37,6 +37,8 @@
 .records p { white-space: pre-wrap; }
 .notice { color: var(--dsw-alias-label-primary); }
 .loading { min-height: 96px; display: grid; place-items: center; }
+.naming { display: grid; gap: 12px; }
+.dialog { width: min(520px, 100%); padding: 28px; overflow-y: auto; }
 @media (max-width: 480px) {
   .facts { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   .facts dd { margin-bottom: 8px; }

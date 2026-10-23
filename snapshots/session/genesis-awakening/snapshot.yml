@@ -1,0 +1,9 @@
+version: 1
+scenario: genesis-awakening
+profile: headless
+composition: genesis-awakening
+recording: authored
+header:
+  class: genesis-awakening
+  pin: true
+  changes: 1
