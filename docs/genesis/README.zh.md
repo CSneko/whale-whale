@@ -8,7 +8,7 @@ Genesis 在会话和模型之间保持同一生命身份，保存带来源的候
 
 ## 目录
 
-[架构](architecture.zh.md) · [数据模型](data-model.zh.md) · [开发](development.zh.md) · [后续方向](roadmap.zh.md)
+[首次唤醒](awakening.zh.md) · [记忆](memory.zh.md) · [架构](architecture.zh.md) · [数据模型](data-model.zh.md) · [开发](development.zh.md) · [后续方向](roadmap.zh.md)
 
 ## 从源码工作区运行
 
@@ -38,6 +38,8 @@ pnpm dsh web --patch packages/experimental/genesis/cordis.patch.yml --patch pack
 
 构建后去掉 `--dump-config` 即可启动 Web，监听地址遵循原有 Harness 策略，Genesis 不新增监听端口。界面显示上次刷新时间；刷新失败时保留旧样本并显示警告。
 
+需要先配置凭据、命名、新生角色和持久工具学习时，请使用[首次唤醒教程](awakening.zh.md)。生命覆盖配置包含独立记忆流水线，最初只向模型开放学习工具。
+
 ## 查询与记忆
 
 通过 `genesis_self` 查询身份和诞生时间，使用 `genesis_recall` 搜索记忆，使用 `genesis_history` 查询事实或成长。明确要求记忆并写出原文，例如“请记住：我喜欢乌龙茶”。`genesis_remember` 只接受最近观察到的真实用户消息中的原文，并保存为带来源的候选记忆。
@@ -46,7 +48,7 @@ pnpm dsh web --patch packages/experimental/genesis/cordis.patch.yml --patch pack
 
 ## 限制
 
-情绪、动机、自主目标、唤醒、反思与自我完善尚未实现。工具发现记录可用性，不代表掌握能力或已获权限。当前没有向量数据库、自动插件安装或自主修改源码。
+情绪、动机、自主目标、自主唤醒调度、反思与自我完善尚未实现。工具发现记录可用性，不代表掌握能力或已获权限。可选[记忆流水线](memory.zh.md)提供嵌入搜索和独立更新；自动插件安装和自主修改源码仍不可用。
 
 ## 开发说明
 

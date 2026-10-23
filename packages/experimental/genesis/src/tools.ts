@@ -6,6 +6,7 @@ import { z } from 'zod'
 import type { Config } from './config.ts'
 import { GenesisError } from './error.ts'
 import type { LifeCore } from './core.ts'
+import type { LifeMemoryEngine } from './memory.ts'
 
 /**
  * Register query and explicitly sourced candidate-memory tools in the mounting scope.
@@ -13,9 +14,10 @@ import type { LifeCore } from './core.ts'
  * @param core - Ready persistent life owner.
  * @param config - Complete output and retrieval bounds.
  * @param userEvidence - Latest actual user message observed since plugin activation.
+ * @param memory - Optional semantic recall and independent post-turn writer.
  */
 export function registerTools(ctx: Context, core: LifeCore, config: Config,
-  userEvidence: (sessionId: SessionId) => SessionEvent<'user/message'> | undefined): void {
+  userEvidence: (sessionId: SessionId) => SessionEvent<'user/message'> | undefined, memory?: LifeMemoryEngine): void {
   const output = {
     schema: { type: 'json' } as const,
     render: (_args: unknown, value: z.core.util.JSONType) => [{ type: 'text' as const, text: JSON.stringify(value) }],
@@ -33,7 +35,9 @@ export function registerTools(ctx: Context, core: LifeCore, config: Config,
       exec.signal.throwIfAborted()
       const agent = exec.agent
       if (agent === undefined) throw new GenesisError('invalid-source', 'Genesis requires a calling Agent.')
-      await core.scan(agent.session.id, ctx.tools.schemas(agent))
+      const learned = config.awakening === undefined ? undefined : core.learningStatus().tools
+      await core.scan(agent.session.id, ctx.tools.schemas(agent)
+        .filter(tool => learned === undefined || tool.name === 'learn' || learned.includes(tool.name)))
       const state = await core.snapshot()
       return bounded({ identity: state.identity,
         environment: { platform: process.platform, arch: process.arch, node: process.versions.node },
@@ -46,13 +50,14 @@ export function registerTools(ctx: Context, core: LifeCore, config: Config,
   }))
   ctx.tools.register(defineTool({
     name: 'genesis_recall',
-    description: 'Search persistent sourced candidate memories across Sessions. Empty query lists important recent memories; source event ids allow evidence inspection.',
+    description: 'Search persistent sourced candidate memories across Sessions. Provide a meaningful nonempty query for semantic recall when the memory pipeline is enabled. Source event ids allow evidence inspection.',
     parameters: { query: { type: 'string', required: true },
       category: { type: 'string', enum: ['episodic', 'semantic', 'self', 'procedural'] } }, output,
     async execute(args, exec) {
       exec.signal.throwIfAborted()
-      return bounded(await core.retrieve({ text: args.query, ...(args.category === undefined ? {} : { category: args.category }),
-        limit: config.queryLimit, chars: config.resultChars - 2 }))
+      const query = { text: args.query, ...(args.category === undefined ? {} : { category: args.category }),
+        limit: config.queryLimit, chars: config.resultChars - 2 }
+      return bounded(await (memory === undefined ? core.retrieve(query) : memory.recall(query, exec.signal)))
     },
     presentCall: args => ({ card: 'generic', title: 'Genesis', kind: 'search', rawInput: args.query }),
   }))
@@ -76,7 +81,7 @@ export function registerTools(ctx: Context, core: LifeCore, config: Config,
   }))
   ctx.tools.register(defineTool({
     name: 'genesis_remember',
-    description: 'Save a candidate memory only when the user explicitly asks to remember it. Evidence is taken from the latest matching user message in this Session. Content must occur verbatim in that message. This does not establish truth or change identity or capabilities.',
+    description: 'Request a candidate memory only when the user explicitly asks to remember it. Content must occur verbatim in the latest matching user message in this Session. With the memory pipeline enabled, the independent reviewer and writer decide and commit after the reply; a pending request is not a saved memory. Otherwise the sourced candidate is saved directly. This does not establish truth or change identity or capabilities.',
     parameters: {
       content: { type: 'string', required: true }, source_seq: { type: 'integer' },
       category: { type: 'string', required: true, enum: ['episodic', 'semantic', 'self', 'procedural'] },
@@ -92,12 +97,14 @@ export function registerTools(ctx: Context, core: LifeCore, config: Config,
         || !source.data.content.some(block => block.type === 'text' && block.text.includes(args.content.trim()))) {
         throw new GenesisError('invalid-source', 'Memory needs verbatim content from an actual user message in this Session.')
       }
+      if (memory !== undefined) return bounded({ status: 'pending-independent-review',
+        message: 'The independent memory reviewer will consider this actual user message after the reply completes. No memory has been committed yet.' })
       const event = await core.observe({ sessionId: agent.session.id, eventId: String(source.seq),
         timestamp: new Date(source.time).toISOString(), kind: 'user-message' })
       exec.signal.throwIfAborted()
-      const memory = await core.remember({ content: args.content, category: args.category, importance: args.importance,
+      const savedMemory = await core.remember({ content: args.content, category: args.category, importance: args.importance,
         confidence: args.confidence, sourceEventIds: [event.id] })
-      return bounded({ memory, status: 'candidate', source: { sessionId: agent.session.id, seq: source.seq } })
+      return bounded({ memory: savedMemory, status: 'candidate', source: { sessionId: agent.session.id, seq: source.seq } })
     },
     presentCall: args => ({ card: 'generic', title: 'Genesis', kind: 'edit', rawInput: args.content }),
   }))

@@ -3,35 +3,35 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/experimental/client-ui-genesis/README.md
 /:
-  en: 8f14d6d0a15878e2
-  zh: 131fb4d8473b3a9a
+  en: 276a676cc2ec4fa4
+  zh: c3f0e89208ef47d2
 /deepseek-ai-dsh-experimental-client-ui-genesis:
   en: 8c474a833241aad6
   zh: 1ee5bcbb8b6a94b1
 /deepseek-ai-dsh-experimental-client-ui-genesis/summary:
-  en: 2bb15b26a6a6aec8
-  zh: b060e4352eeb407c
+  en: f2caa556089a9ca4
+  zh: 0dc11d112cd96484
 /deepseek-ai-dsh-experimental-client-ui-genesis/table-of-contents:
   en: bf9fa3f38eff405d
   zh: eb85db0a9bc40fc0
 /deepseek-ai-dsh-experimental-client-ui-genesis/use:
-  en: ab4f0289ef557358
-  zh: a730de724329d915
+  en: dec0d8e3471a2142
+  zh: 0b2223a6eb113d87
 /deepseek-ai-dsh-experimental-client-ui-genesis/implementation:
-  en: 918e2529932848aa
-  zh: 4a88ec56444ebe5e
+  en: ffe12dcdb3e0e944
+  zh: 6150116eb5bb3c9e
 /deepseek-ai-dsh-experimental-client-ui-genesis/further-exploration:
   en: c0ca6442405bd61b
   zh: e0839676a539efd7
 /deepseek-ai-dsh-experimental-client-ui-genesis/model-experience:
-  en: bda3bba0eb2f5a7b
-  zh: dd9a2a4ed1f641ed
+  en: 66f182702fdd5b76
+  zh: ab209dcd2bdde0bf
 /deepseek-ai-dsh-experimental-client-ui-genesis/model-experience/kv-cache-effect:
   en: 9e586f7691e29186
   zh: 3364e946a341c904
 /deepseek-ai-dsh-experimental-client-ui-genesis/known-limitations-and-deferred-work:
-  en: de202dd7de9b2165
-  zh: 60090d954a00227a
+  en: 019841030d39f67d
+  zh: d7b65a0c77db2c84
 /deepseek-ai-dsh-experimental-client-ui-genesis/known-limitations-and-deferred-work/dev-note:
   en: 0a1253c6f7b5e8b9
   zh: 9f56528562c7c914

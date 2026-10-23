@@ -13,5 +13,6 @@ Shared Session event declarations and resolved schemas appear in the [Session pe
 
 | Record | Owner | Purpose | Payload and source |
 |---|---|---|---|
+| `plugin:genesis/memory-call` | `@deepseek-ai/dsh-experimental-genesis` | Auxiliary memory inputs and outputs; retained for audit, never conversation context or replay state. | <code>MemoryCallRecord</code> · [`packages/experimental/genesis/src/memory.ts`](../packages/experimental/genesis/src/memory.ts) |
 | `plugin:translator/request` | `@deepseek-ai/dsh-experimental-translator` | Provider-independent translation input, retained before dispatch. | <code>TranslationRequestRecord</code> · [`packages/experimental/translator/src/types.ts`](../packages/experimental/translator/src/types.ts) |
 | `plugin:translator/result` | `@deepseek-ai/dsh-experimental-translator` | Successful translation, retained before it is returned to the consumer. | <code>TranslationResultRecord</code> · [`packages/experimental/translator/src/types.ts`](../packages/experimental/translator/src/types.ts) |

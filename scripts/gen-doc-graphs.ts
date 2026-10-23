@@ -108,6 +108,16 @@ const GROUP_ORDER = [
 
 const SERVICE_ROLES: ServiceRole[] = [
   {
+    key: 'genesis', pkg: 'experimental-genesis', title: 'Persistent Genesis life', mode: 'core',
+    consumers: ['experimental-genesis'],
+    note: 'Owns one durable life, sourced memory, observed growth and local backups; the optional memory pipeline adds independent updates and semantic recall.',
+  },
+  {
+    key: 'genesisStatus', pkg: 'experimental-genesis', title: 'Genesis status projection', mode: 'core',
+    consumers: ['experimental-client-ui-genesis'],
+    note: 'Samples bounded life and memory previews for the authenticated experimental Web settings contribution.',
+  },
+  {
     key: 'cotTranslation',
     pkg: 'experimental-client-ui-cot-translation',
     title: 'Reasoning translation Remote',

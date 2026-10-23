@@ -1,0 +1,25 @@
+# Apply after cordis.patch.yml; add the Genesis UI overlay for interactive first-run naming.
+- id: agent-default-model
+  config:
+    provider: !!js process.env.GENESIS_CHAT_PROVIDER ?? 'deepseek-official'
+    model: !!js process.env.GENESIS_CHAT_MODEL ?? 'deepseek-v4-flash'
+
+- id: tools
+  config:
+    mode: native
+
+- id: genesis
+  config:
+    leasePath: !!js dshHomePath('genesis.writer.lock')
+    awakening:
+      provider: !!js process.env.GENESIS_CHAT_PROVIDER ?? 'deepseek-official'
+      model: !!js process.env.GENESIS_CHAT_MODEL ?? 'deepseek-v4-flash'
+    memory:
+      decisionProvider: !!js process.env.GENESIS_DECISION_PROVIDER ?? process.env.GENESIS_CHAT_PROVIDER ?? 'deepseek-official'
+      decisionModel: !!js process.env.GENESIS_DECISION_MODEL ?? process.env.GENESIS_CHAT_MODEL ?? 'deepseek-v4-flash'
+      writerProvider: !!js process.env.GENESIS_WRITER_PROVIDER ?? process.env.GENESIS_CHAT_PROVIDER ?? 'deepseek-official'
+      writerModel: !!js process.env.GENESIS_WRITER_MODEL ?? process.env.GENESIS_CHAT_MODEL ?? 'deepseek-v4-flash'
+      embeddingUrl: !!js process.env.GENESIS_EMBEDDING_URL
+      embeddingModel: !!js process.env.GENESIS_EMBEDDING_MODEL
+      embeddingDimensions: !!js Number(process.env.GENESIS_EMBEDDING_DIMENSIONS)
+      embeddingKeyEnv: GENESIS_EMBEDDING_API_KEY

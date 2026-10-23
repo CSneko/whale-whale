@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for awakening.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/genesis/awakening.md
+/genesis-first-awakening:
+  en: e9546a7204d615c2
+  zh: 57aacb6e13468159
+/genesis-first-awakening/configure-and-start:
+  en: 1360b7af369c0b35
+  zh: c6d36cbe89057845
+/genesis-first-awakening/meet-her:
+  en: 00e63d77a424f95f
+  zh: e98b3e9cb9fa7c18
+/genesis-first-awakening/teach-a-tool:
+  en: a8000d4ff40f96b5
+  zh: 9dd3427e0c9c6c22
+/genesis-first-awakening/context-and-recovery:
+  en: d27d43a2735ff508
+  zh: 48ff709a1105ec86

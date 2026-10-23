@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for 2026-10-23-genesis-layered-memory.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-10-23-genesis-layered-memory.md
+/agent-note-independent-layered-memory-for-one-genesis-life:
+  en: c0da65d6d8898f7d
+  zh: 92e1b0220074433c
+/agent-note-independent-layered-memory-for-one-genesis-life/problem:
+  en: 2dede5771925e901
+  zh: f74dadf85eb05002
+/agent-note-independent-layered-memory-for-one-genesis-life/decision:
+  en: 1bd903f855c6ab71
+  zh: 7899d49916bcbe40
+/agent-note-independent-layered-memory-for-one-genesis-life/alternatives-considered:
+  en: d943bfe222da538a
+  zh: 905ca4d73c34947e
+/agent-note-independent-layered-memory-for-one-genesis-life/consequences:
+  en: 8ed0cad245de58c2
+  zh: c07ad3c7f4bfe96b

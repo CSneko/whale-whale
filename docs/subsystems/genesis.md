@@ -32,6 +32,34 @@ start(): Promise<void>
 async snapshot(): Promise<LifeState>
 
 /**
+ * Read committed naming, learned tools and the first conversation, without copying another Session's context.
+ * @returns Detached global life progress; an untrusted or closed core rejects.
+ */
+learningStatus(): { ready: boolean; tools: string[]; firstSessionId?: SessionId }
+
+/**
+ * Name the existing life once after the application has checked model configuration; never create a second identity.
+ * @param name - User-selected name, validated before storage admission.
+ * @returns After naming commits; repeating the same name is idempotent and a conflicting name is refused.
+ */
+awaken(name: string): Promise<void>
+
+/**
+ * Bind the first accepted conversation once; subsequent Sessions retain their own context.
+ * @param sessionId - Session receiving an actual first user input.
+ * @returns After the first-conversation fact commits, or after an idempotent repeat.
+ */
+beginConversation(sessionId: SessionId): Promise<void>
+
+/**
+ * Persist one tool-learning event, independently of availability and execution permissions.
+ * @param tool - Exact current tool name checked by the learning tool against the caller's registry.
+ * @param sessionId - Actual learning Session.
+ * @returns After learning and its growth record commit together; repeats do not duplicate them.
+ */
+learn(tool: string, sessionId: SessionId): Promise<void>
+
+/**
  * Append an attributed fact once, identified by Session plus durable sequence.
  * @param observation - Actual Session event metadata, never a model assertion.
  * @returns Committed fact, including the original fact for duplicate delivery.
@@ -92,6 +120,15 @@ rename(name: string | null): Promise<void>
 async getMemory(id: MemoryId): Promise<LifeMemory | undefined>
 
 /**
+ * Atomically apply an independent writer's changes and record a completed review once.
+ * @param key - Stable source turn or explicit user-memory request key.
+ * @param changes - Validated changes; all references must belong to this life.
+ * @param maxImplicit - Whole-life non-declarative record limit.
+ * @returns After all changes and the replay marker commit, or no-op on replay.
+ */
+reviewMemory(key: string, changes: MemoryChange[], maxImplicit: number): Promise<void>
+
+/**
  * Retrieve lexical memories by category, time, importance and recency.
  * @param query - Explicit result and character bounds.
  * @returns Highest-ranked whole memories fitting both limits.
@@ -112,7 +149,7 @@ async events(query: EventQuery): Promise<LifeEvent[]>
 close(): Promise<void>
 ```
 
-Types: [EventQuery](../genesis/data-model.md) · [LifeEvent](../genesis/data-model.md) · [LifeMemory](../genesis/data-model.md) · [LifeState](../genesis/data-model.md) · [MemoryId](../genesis/data-model.md) · [MemoryInput](../genesis/data-model.md) · [MemoryQuery](../genesis/data-model.md) · [ObservedInteraction](../genesis/data-model.md) · [SessionId](core.md) · [ToolSchema](tools.md)
+Types: [EventQuery](../genesis/data-model.md) · [LifeEvent](../genesis/data-model.md) · [LifeMemory](../genesis/data-model.md) · [LifeState](../genesis/data-model.md) · [MemoryChange](../genesis/memory.md) · [MemoryId](../genesis/data-model.md) · [MemoryInput](../genesis/data-model.md) · [MemoryQuery](../genesis/data-model.md) · [ObservedInteraction](../genesis/data-model.md) · [SessionId](core.md) · [ToolSchema](tools.md)
 
 Source: [`packages/experimental/genesis/src/core.ts`](../../packages/experimental/genesis/src/core.ts)
 
@@ -120,9 +157,18 @@ Source: [`packages/experimental/genesis/src/core.ts`](../../packages/experimenta
 
 ### `ctx.genesisStatus` — `GenesisStatusGateway`
 
-Read current Genesis state without exposing a remote identity or permission writer.
+Sample shared life state and initialize its name without changing its identity or permissions.
 
 ```ts cordis-catalog
+/**
+ * Check configured chat/reviewer/writer routes and the embedding service, then name this existing life once.
+ * Credentials use the existing provider settings or account sign-in; no secrets are accepted or stored here.
+ * @param name - User-chosen name, retained across Sessions and restarts.
+ * @param signal - Caller cancellation; an admitted storage commit may still finish after cancellation.
+ * @returns After naming commits; errors leave initialization pending unless a storage write has uncertain outcome.
+ */
+@Remote('initialize') async initialize(name: string, signal: AbortSignal): Promise<void>
+
 /**
  * Sample live tools, identity, counts and bounded memory/growth previews.
  * Historical scopes are excluded from current availability. Errors reject;

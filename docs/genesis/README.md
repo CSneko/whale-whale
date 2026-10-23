@@ -8,7 +8,7 @@ Keep one life identity across Sessions and models, retain sourced candidate memo
 
 ## Contents
 
-[Architecture](architecture.md) · [Data model](data-model.md) · [Development](development.md) · [Roadmap](roadmap.md)
+[First awakening](awakening.md) · [Memory](memory.md) · [Architecture](architecture.md) · [Data model](data-model.md) · [Development](development.md) · [Roadmap](roadmap.md)
 
 ## Run from this workspace
 
@@ -38,6 +38,8 @@ pnpm dsh web --patch packages/experimental/genesis/cordis.patch.yml --patch pack
 
 After building, remove `--dump-config` to start Web. The default Harness listener policy applies; Genesis adds no listener. The UI shows the last refresh time and retains a previous sample with a warning when refresh fails.
 
+For credential-first naming, the newborn character and persistent tool learning, use the [first-awakening tutorial](awakening.md). Its life overlay includes the independent memory pipeline and limits initial model tools to learning.
+
 ## Inspect and remember
 
 Ask for identity or birth time through `genesis_self`; search with `genesis_recall`; query facts or growth with `genesis_history`. Explicitly request a memory and include its literal content: “Please remember: I prefer oolong tea”. `genesis_remember` admits only text from the latest observed real user message and stores it as a sourced candidate.
@@ -46,7 +48,7 @@ Disable Genesis by omitting its overlays on the next launch. Disabling the Web c
 
 ## Limits
 
-Emotion, motivation, autonomous goals, awakening, reflection and self-improvement are not implemented. Tool discovery records availability, not mastery or permission. There is no vector database, automatic plugin installation or autonomous source modification.
+Emotion, motivation, autonomous goals, autonomous wake scheduling, reflection and self-improvement are not implemented. Tool discovery records availability, not mastery or permission. The optional [memory pipeline](memory.md) adds embedding search and independent updates. Automatic plugin installation and autonomous source modification remain unavailable.
 
 ## Dev Note
 

@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for memory.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/genesis/memory.md
+/genesis-long-term-memory:
+  en: 6e47f5f16465da82
+  zh: 6c51f716540ee1e8
+/genesis-long-term-memory/enable:
+  en: 12306bcc81404abd
+  zh: ce016f945b35fa5d
+/genesis-long-term-memory/recall-and-updates:
+  en: b34d44e8ff6860b6
+  zh: cb78106abf00f52c
+/genesis-long-term-memory/persistence-and-local-backup:
+  en: 53a21869180df0f0
+  zh: 319093745990e13e
+/genesis-long-term-memory/verification-and-limits:
+  en: 960cd6a0953c9447
+  zh: d3d14af22af26c29
