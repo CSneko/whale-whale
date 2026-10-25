@@ -13,6 +13,7 @@
 
 | 记录 | 所属包 | 用途 | 载荷与源码 |
 |---|---|---|---|
-| `plugin:genesis/memory-call` | `@deepseek-ai/dsh-experimental-genesis` | Auxiliary memory inputs and outputs; retained for audit, never conversation context or replay state. | <code>MemoryCallRecord</code> · [`packages/experimental/genesis/src/memory.ts`](../packages/experimental/genesis/src/memory.ts) |
+| `plugin:genesis/memory-call` | `@deepseek-ai/dsh-experimental-genesis` | Auxiliary memory and emotion inputs and outputs; retained for audit, never conversation context or replay state. | <code>MemoryCallRecord</code> · [`packages/experimental/genesis/src/auxiliary-call.ts`](../packages/experimental/genesis/src/auxiliary-call.ts) |
+| `plugin:genesis/model-http` | `@deepseek-ai/dsh-experimental-genesis` | Exact auxiliary HTTP inference inputs and bounded responses, excluding authorization. | <code>{ version: 1; phase: 'request'; route: MemoryModelsSettings['decision'] &#124; MemoryModelsSettings['writer']; body: object; } &#124; { version: 1; phase: 'response'; requestSeq: SessionSeq; body: unknown; }</code> · [`packages/experimental/genesis/src/auxiliary-call.ts`](../packages/experimental/genesis/src/auxiliary-call.ts) |
 | `plugin:translator/request` | `@deepseek-ai/dsh-experimental-translator` | Provider-independent translation input, retained before dispatch. | <code>TranslationRequestRecord</code> · [`packages/experimental/translator/src/types.ts`](../packages/experimental/translator/src/types.ts) |
 | `plugin:translator/result` | `@deepseek-ai/dsh-experimental-translator` | Successful translation, retained before it is returned to the consumer. | <code>TranslationResultRecord</code> · [`packages/experimental/translator/src/types.ts`](../packages/experimental/translator/src/types.ts) |

@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.1-rc.2/genesis-life-memory-models/guide.md
+/:
+  en: bcdf367a2a4c4307
+  zh: d9df0cf18ce90d67
+/genesis-life-mode-and-memory-model-configuration:
+  en: 7cbc76c01a32d844
+  zh: 82b3e2f150e68a08
+/genesis-life-mode-and-memory-model-configuration/change:
+  en: 1c753ec2271cacb0
+  zh: b0640e7077caf830
+/genesis-life-mode-and-memory-model-configuration/migration:
+  en: 956124e1bcd8cb9b
+  zh: 575447c6f376996f

@@ -1,0 +1,28 @@
+# Bilingual-pair consistency record for 2026-10-23-genesis-first-awakening-source.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/persistence-changes/2026-10-23-genesis-first-awakening-source.md
+/:
+  en: 3d5a424ae7d7e46b
+  zh: c22a8e4a62d8cc1a
+/2026-10-23-genesis-first-awakening-source:
+  en: 91840eab4ebc5424
+  zh: adf4a4a267fc0053
+/2026-10-23-genesis-first-awakening-source/summary:
+  en: cc708a0ed82cc3ea
+  zh: e75e699cf34dbaa9
+/2026-10-23-genesis-first-awakening-source/table-of-contents:
+  en: 6cf314a069ceb451
+  zh: 9adff678e9ecab3b
+/2026-10-23-genesis-first-awakening-source/declaration:
+  en: 6907136f28e48c90
+  zh: 02f8298485f3d8e7
+/2026-10-23-genesis-first-awakening-source/compatibility:
+  en: 431c473d09c45b4e
+  zh: d5cef659c243ce2e
+/2026-10-23-genesis-first-awakening-source/verification:
+  en: 5475470e2ec1fc6d
+  zh: 2812fd8b5c2ce017
+/2026-10-23-genesis-first-awakening-source/dev-note:
+  en: b75c8458928b72b9
+  zh: 003ba4e17b4b5269

@@ -1,0 +1,14 @@
+# Apply after cordis.patch.yml; this complete config enables memory and emotion together.
+- id: genesis
+  config:
+    leasePath: !!js dshHomePath('genesis.writer.lock')
+    emotion: {}
+    memory:
+      decisionProvider: deepseek-official
+      decisionModel: deepseek-v4-flash
+      writerProvider: deepseek-official
+      writerModel: deepseek-v4-flash
+      embeddingUrl: !!js process.env.GENESIS_EMBEDDING_URL
+      embeddingModel: !!js process.env.GENESIS_EMBEDDING_MODEL
+      embeddingDimensions: !!js Number(process.env.GENESIS_EMBEDDING_DIMENSIONS ?? 0)
+      embeddingKeyEnv: GENESIS_EMBEDDING_API_KEY

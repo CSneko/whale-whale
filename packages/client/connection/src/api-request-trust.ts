@@ -14,6 +14,7 @@
 
 import { isLoopbackHostname } from './loopback-hostname.ts'
 import type { ConnectionTrustRequest } from './rpc.ts'
+import { socketIp } from './socket-address.ts'
 
 function header(headers: ConnectionTrustRequest['headers'], name: string): string | undefined {
   if (headers instanceof Headers) return headers.get(name) ?? undefined
@@ -102,8 +103,13 @@ export function isRemoteAuthority(entry: string): boolean {
  * like a port-less entry, and any `%zone` id (an interface selector, not
  * address text).
  */
-function isBindAddressAuthority(hostUrl: URL, bindHost: string | undefined): boolean {
+function isBindAddressAuthority(hostUrl: URL, bindHost: string | undefined, localAddress: string | undefined): boolean {
   if (bindHost === undefined) return false
+  if (bindHost === '0.0.0.0' || bindHost === '::') {
+    const local = socketIp(localAddress)
+    const requested = socketIp(hostUrl.hostname.replace(/^\[|\]$/gu, ''))
+    if (local !== undefined && requested === local) return true
+  }
   const zoneAt = bindHost.indexOf('%')
   const address = zoneAt === -1 ? bindHost : bindHost.slice(0, zoneAt)
   const bindUrl = parseAuthority(address.includes(':') ? `[${address}]` : address)
@@ -137,7 +143,7 @@ export function isTrustedApiRequest(
   if (hostUrl === undefined) return false
   if (!isLoopbackHostname(hostUrl.hostname)
     && !isTrustedAuthority(hostUrl, trustedHosts, protocol)
-    && !isBindAddressAuthority(hostUrl, bindHost)) return false
+    && !isBindAddressAuthority(hostUrl, bindHost, request.socket?.localAddress)) return false
   // Cross-site fence: modern browsers label the initiator relationship on
   // every fetch; an explicit cross-site marker is refused regardless of Origin.
   if (header(request.headers, 'sec-fetch-site') === 'cross-site') return false

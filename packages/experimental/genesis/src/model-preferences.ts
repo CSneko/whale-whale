@@ -1,0 +1,77 @@
+/** Revisioned auxiliary model routes; stored independently of immutable life history. @module */
+import { z } from 'zod'
+import { defineDomain, domainTable, type Domain } from '@deepseek-ai/dsh-storage-domain'
+import type { Config, MemoryConfig } from './config.ts'
+import type { MemoryModelsSettings } from './status-types.ts'
+import { GenesisError } from './error.ts'
+
+const endpoint = { url: z.url().refine((value) => {
+  const url = new URL(value)
+  return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash
+}), model: z.string().trim().min(1).max(512), keyRef: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).optional() }
+const provider = z.strictObject({ kind: z.literal('provider'), provider: z.string().trim().min(1).max(512), model: endpoint.model })
+const modelsSchema = z.strictObject({
+  decision: z.discriminatedUnion('kind', [provider, z.strictObject({ kind: z.literal('jev'), ...endpoint, threshold: z.number().min(0).max(1) })]),
+  writer: z.discriminatedUnion('kind', [provider, z.strictObject({ kind: z.literal('openai'), ...endpoint })]),
+})
+const rowSchema = z.strictObject({ schemaVersion: z.literal(1), revision: z.number().int().min(1), models: modelsSchema })
+/** Separate schema generation: existing life and embedding domains are unchanged. */
+export const modelPreferencesDomain = defineDomain({ name: 'genesis_model_settings', version: 1,
+  tables: { settings: domainTable<'models', z.infer<typeof rowSchema>>(rowSchema) } })
+
+/**
+ * Resolve deployment routes before any GUI save.
+ * @param memory - Optional memory deployment.
+ * @returns Nonsecret decision and writer routes; missing models remain visibly pending.
+ */
+export function memoryModels(memory?: MemoryConfig): MemoryModelsSettings {
+  return {
+    decision: memory?.decisionUrl === undefined
+      ? { kind: 'provider', provider: memory?.decisionProvider ?? '', model: memory?.decisionModel ?? '' }
+      : { kind: 'jev', url: memory.decisionUrl, model: memory.decisionModel, threshold: memory.decisionThreshold ?? 0.5,
+        ...(memory.decisionKeyEnv === undefined ? {} : { keyRef: memory.decisionKeyEnv }) },
+    writer: { kind: 'provider', provider: memory?.writerProvider ?? '', model: memory?.writerModel ?? '' },
+  }
+}
+
+/** Serializes revision checks and commits under the existing life writer lease. */
+export class ModelPreferences {
+  private tail: Promise<void> = Promise.resolve()
+  private failure: GenesisError | undefined
+  private closing: Promise<void> | undefined
+  /** @param domain - Exclusive preferences domain. @param config - Deployment fallback. */
+  constructor(private readonly domain: Domain<typeof modelPreferencesDomain>, private readonly config: Config) {}
+  /** @returns Detached effective routes and revision; zero means deployment values. */
+  read(): { revision: number; models: MemoryModelsSettings } {
+    if (this.failure !== undefined) throw this.failure
+    if (this.closing !== undefined) throw new GenesisError('closed', 'Memory model settings are closing.')
+    const saved = this.domain.table('settings').get('models')
+    return saved === undefined ? { revision: 0, models: memoryModels(this.config.memory) }
+      : { revision: saved.revision, models: structuredClone(saved.models) }
+  }
+  /**
+   * Persist only validated nonsecret routes; stale edits cannot overwrite newer settings.
+   * @param settings - Independent decision and writer routes.
+   * @param revision - Last displayed revision.
+   * @returns Committed revision; uncertain writes stop dependent operations until verified reload.
+   */
+  save(settings: MemoryModelsSettings, revision: number): Promise<number> {
+    const models = modelsSchema.parse(settings)
+    this.read()
+    const operation = this.tail.then(async () => {
+      if (this.failure !== undefined) throw this.failure
+      const current = this.domain.table('settings').get('models')?.revision ?? 0
+      if (current !== revision) throw new GenesisError('configuration-conflict', 'Memory model settings changed. Refresh before saving again.')
+      try { await this.domain.table('settings').put('models', { schemaVersion: 1, revision: current + 1, models }) }
+      catch (error) {
+        this.failure = new GenesisError('storage', 'Memory model settings write has an uncertain outcome. Reload verified storage before memory operations.', { cause: error })
+        throw this.failure
+      }
+      return current + 1
+    })
+    this.tail = operation.then(() => {}, (_error: unknown) => { /* The caller reports failures; disposal drains the settled queue. */ })
+    return operation
+  }
+  /** @returns After accepted writes drain and the preferences domain closes. */
+  close(): Promise<void> { this.closing ??= this.tail.then(() => this.domain.close()); return this.closing }
+}

@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 /** First-run DeepSeek prompt behavior over the shared Models join. */
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
+import type { ConfigFormSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { GlobalStandardProps } from '@deepseek-ai/dsh-client-ui-slots'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -142,7 +144,14 @@ function harness(options: {
   const openSection = vi.fn()
   const complete = vi.fn()
   const unusedHook = (() => { throw new Error('unused standard hook') }) as never
+  const preference = createSnapshotStore<ConfigFormSnapshot<Record<string, unknown>>>({
+    status: 'ready', value: {}, base: {}, user: {}, revision: 0, writable: true })
+  const dismissOnboarding = vi.fn(async () => {
+    preference.update((state) => { state.value = { credentialOnboardingDismissed: true } })
+    return true
+  })
   const props: DeepSeekOnboardingDialogProps = {
+    useOnboardingPreference: bindSnapshotSelector(preference), dismissOnboarding,
     automatic: true,
     stepId: 'deepseek-official',
     complete,
@@ -160,7 +169,7 @@ function harness(options: {
     t: key => en[key],
   }
   return {
-    controller, complete, openSection, props, mutate, set,
+    controller, complete, openSection, props, mutate, set, preference, dismissOnboarding,
     configure: () => { fileConfigured = true },
   }
 }
@@ -312,4 +321,20 @@ it('keeps explicit API key setup available when automatic onboarding is disabled
   render(<DeepSeekOnboardingDialog {...h.props} />)
   await waitFor(() => { expect(screen.getByRole('dialog')).toBeTruthy() })
   expect(h.complete).not.toHaveBeenCalled()
+})
+
+
+it('persists Do not show again and suppresses later automatic configuration dialogs while allowing explicit setup', async () => {
+  const h = harness()
+  const view = render(<DeepSeekOnboardingDialog {...h.props} />)
+  await screen.findByRole('dialog', { name: en.onboardingTitle })
+  fireEvent.click(screen.getByRole('button', { name: en.onboardingDontShow }))
+  await waitFor(() => { expect(h.complete).toHaveBeenCalled() })
+  expect(h.dismissOnboarding).toHaveBeenCalledOnce()
+  expect(screen.queryByRole('dialog')).toBeNull()
+  view.unmount()
+  const reopened = render(<DeepSeekOnboardingDialog {...h.props} />)
+  expect(screen.queryByRole('dialog')).toBeNull()
+  reopened.rerender(<DeepSeekOnboardingDialog {...h.props} explicit />)
+  expect(await screen.findByRole('dialog', { name: en.onboardingTitle })).toBeTruthy()
 })

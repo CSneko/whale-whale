@@ -15,9 +15,9 @@ export class StatusResource {
    * @param signal - Resource lifetime; abort ends waits and cancels in-flight RPC.
    * @returns Result frames for the shared resource owner.
    */
-  async *open(
-    read: (signal: AbortSignal) => Promise<RemoteResult<LifeStatus>>, signal: AbortSignal,
-  ): AsyncIterable<RemoteResult<LifeStatus>> {
+  async *open<T = LifeStatus>(
+    read: (signal: AbortSignal) => Promise<RemoteResult<T>>, signal: AbortSignal,
+  ): AsyncIterable<RemoteResult<T>> {
     const aborted = () => signal.aborted
     let pending = true
     let wake: (() => void) | undefined

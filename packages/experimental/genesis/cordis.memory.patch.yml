@@ -9,5 +9,5 @@
       writerModel: deepseek-v4-flash
       embeddingUrl: !!js process.env.GENESIS_EMBEDDING_URL
       embeddingModel: !!js process.env.GENESIS_EMBEDDING_MODEL
-      embeddingDimensions: !!js Number(process.env.GENESIS_EMBEDDING_DIMENSIONS)
+      embeddingDimensions: !!js Number(process.env.GENESIS_EMBEDDING_DIMENSIONS ?? 0)
       embeddingKeyEnv: GENESIS_EMBEDDING_API_KEY

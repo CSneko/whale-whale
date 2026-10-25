@@ -1,0 +1,16 @@
+# Apply after cordis.patch.yml; choices use the independent writer and existing execution policies.
+- id: genesis
+  config:
+    leasePath: !!js dshHomePath('genesis.writer.lock')
+    interest: {}
+    emotion: {}
+    deliberation: {}
+    memory:
+      decisionProvider: deepseek-official
+      decisionModel: deepseek-v4-flash
+      writerProvider: deepseek-official
+      writerModel: deepseek-v4-flash
+      embeddingUrl: !!js process.env.GENESIS_EMBEDDING_URL
+      embeddingModel: !!js process.env.GENESIS_EMBEDDING_MODEL
+      embeddingDimensions: !!js Number(process.env.GENESIS_EMBEDDING_DIMENSIONS ?? 0)
+      embeddingKeyEnv: GENESIS_EMBEDDING_API_KEY

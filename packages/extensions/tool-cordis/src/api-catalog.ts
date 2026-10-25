@@ -1207,8 +1207,8 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
   },
   {
     key: 'genesis',
-    summary: 'One life domain owner.',
-    description: 'One life domain owner. Writes serialize and replace one snapshot, so facts and state commit together. Storage failures poison this instance until reload; validation and capacity refusals leave it usable. Returned data is detached.',
+    summary: 'One life owner.',
+    description: 'One life owner. Writes serialize components and replace one manifest, so facts and state commit together. Storage failures poison this instance until reload; validation and capacity refusals leave it usable. Returned data is detached.',
     methods: [
       {
         signature: 'start(): Promise<void>',
@@ -1217,13 +1217,79 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'Resolution only after durable startup.',
       },
       {
+        signature: 'prepareDeliberation(sessionId: SessionId, key: string, kind: \'request\' | \'event\', source?: LifeEventId): Promise<LifeEvent>',
+        description: 'Record an actual application deliberation trigger without copying user text.',
+        parameters: [{ name: 'sessionId', description: 'Audit Session receiving the trigger.' }, { name: 'key', description: 'Caller-owned stable replay key, scoped to this Session.' }, { name: 'kind', description: 'Request admission or externally delivered event.' }, { name: 'source', description: 'Required existing life event for an external trigger; absent for requests.' }],
+        returns: 'Original or newly committed trigger fact.',
+      },
+      {
+        signature: 'commitDeliberation(commit: DeliberationCommit): Promise<LifeDecision>',
+        description: 'Publish a validated deliberation and all its state transitions atomically.',
+        parameters: [{ name: 'commit', description: 'Captured evidence, revision and proposal from the independent writer.' }],
+        returns: 'Committed choice; replay returns the original choice without further changes.',
+      },
+      {
+        signature: 'reserveDecisionDispatch(id: DecisionId): Promise<boolean>',
+        description: 'Reserve an autonomous follow-up once before enqueueing; a crash leaves an explicit uncertain admission.',
+        parameters: [{ name: 'id', description: 'Pending externally triggered choice.' }],
+        returns: 'Whether this caller acquired dispatch; replay and settled choices return false.',
+      },
+      {
+        signature: 'permitsDecision(id: DecisionId): boolean',
+        description: 'Check the committed decision synchronously at tool execution; poisoned storage refuses access.',
+        parameters: [{ name: 'id', description: 'Choice admitted by this live Agent\'s integration.' }],
+        returns: 'Whether willingness permits task tools; execution authorization remains independent.',
+      },
+      {
+        signature: 'settleDecision(id: DecisionId, outcome: LifeDecision[\'outcome\'][\'status\'], sources: LifeEventId[]): Promise<void>',
+        description: 'Attach observed Session result references and update failure history, without claiming goal completion.',
+        parameters: [{ name: 'id', description: 'Committed decision whose execution has settled.' }, { name: 'outcome', description: 'Host-derived result, never model-authored text.' }, { name: 'sources', description: 'Actual observed life event IDs from this decision\'s Session.' }],
+        returns: 'After result publication; repeat settlements are no-ops.',
+      },
+      {
+        signature: 'completeLifeGoal(id: LifeGoalId, decisionId: DecisionId, evidence: LifeEventId): Promise<void>',
+        description: 'Confirm goal completion after independent application verification of a successful linked execution.',
+        parameters: [{ name: 'id', description: 'Active life goal; ordinary chat and deliberation proposals cannot complete it.' }, { name: 'decisionId', description: 'Settled successful execution linked to this goal.' }, { name: 'evidence', description: 'Successful tool-result fact from that decision\'s observed outcome.' }],
+        returns: 'After completion and its immutable history commit; replay is idempotent.',
+      },
+      {
+        signature: 'reviewInterest(sessionId: SessionId, current: InterestDialogue[\'turns\'][number], proposals: InterestProposal[]): Promise<void>',
+        description: 'Commit one sourced interest interpretation and a replay marker together.',
+        parameters: [{ name: 'sessionId', description: 'Conversation whose committed exchange supplied the evidence.' }, { name: 'current', description: 'Current completed exchange; older turns are context only.' }, { name: 'proposals', description: 'Validated writer proposals, or an empty list for no change.' }],
+        returns: 'After durable publication; replay of this exchange has no effect.',
+      },
+      {
         signature: 'async snapshot(): Promise<LifeState>',
         description: 'Read committed state after all previously accepted observations settle.',
         parameters: [],
         returns: 'Detached life snapshot; rejects when closed or storage is untrusted.',
       },
       {
-        signature: 'learningStatus(): { ready: boolean; tools: string[]; firstSessionId?: SessionId }',
+        signature: 'reviewEmotion(sessionId: SessionId, evidence: EmotionDialogue[\'turns\'], revision: number, update?: EmotionUpdate): Promise<void>',
+        description: 'Commit an emotion appraisal and its deduplication marker atomically with cited life evidence.',
+        parameters: [{ name: 'sessionId', description: 'Source conversation, never another Session\'s text.' }, { name: 'evidence', description: 'Current exchange and optional earlier complete exchanges.' }, { name: 'revision', description: 'Emotion revision captured before inference; stale proposals are refused.' }, { name: 'update', description: 'Validated signed changes; omitted records a no-change decision.' }],
+        returns: 'After durable commit; replay is a no-op and storage uncertainty stops dependent operations.',
+      },
+      {
+        signature: 'configureEmotion(settings: EmotionSettings, revision: number): Promise<number>',
+        description: 'Save operator emotion rules with revision fencing; recovery under the old rules precedes the change.',
+        parameters: [{ name: 'settings', description: 'Validated complete operator choices; they take precedence over deployment defaults.' }, { name: 'revision', description: 'Last displayed emotion revision; concurrent appraisals or edits reject this write.' }],
+        returns: 'Committed revision; backup uncertainty stops dependent operations until verified reload.',
+      },
+      {
+        signature: 'adjustEmotion(adjustment: EmotionAdjustment, revision: number): Promise<number>',
+        description: 'Set operator-selected absolute intensities without manufacturing dialogue evidence.',
+        parameters: [{ name: 'adjustment', description: 'Validated immediate/mood/need values and nonempty operator reason.' }, { name: 'revision', description: 'Last displayed emotion revision; stale edits leave state unchanged.' }],
+        returns: 'Committed revision; the next request receives the adjusted state through logged context.',
+      },
+      {
+        signature: 'adjustRelationship(adjustment: RelationshipAdjustment, revision: number): Promise<number>',
+        description: 'Replace the deployment operator\'s relationship estimates with an explicit attributed adjustment.',
+        parameters: [{ name: 'adjustment', description: 'Validated display label, five values and audit reason.' }, { name: 'revision', description: 'Last observed emotion revision; conflicting changes reject atomically.' }],
+        returns: 'Committed emotion revision; manual estimates do not become dialogue evidence.',
+      },
+      {
+        signature: 'learningStatus(): { ready: boolean; tools: string[]; firstSessionId?: SessionId; firstConversationComplete: boolean }',
         description: 'Read committed naming, learned tools and the first conversation, without copying another Session\'s context.',
         parameters: [],
         returns: 'Detached global life progress; an untrusted or closed core rejects.',
@@ -1237,14 +1303,32 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       {
         signature: 'beginConversation(sessionId: SessionId): Promise<void>',
         description: 'Bind the first accepted conversation once; subsequent Sessions retain their own context.',
-        parameters: [{ name: 'sessionId', description: 'Session receiving an actual first user input.' }],
+        parameters: [{ name: 'sessionId', description: 'Session receiving the first accepted user or built-in awakening input.' }],
         returns: 'After the first-conversation fact commits, or after an idempotent repeat.',
+      },
+      {
+        signature: 'completeFirstConversation(sessionId: SessionId, eventId: string, timestamp: string): Promise<void>',
+        description: 'Record completion only after the canonical first Session commits a successful turn with a text reply.',
+        parameters: [{ name: 'sessionId', description: 'Actual completed conversation.' }, { name: 'eventId', description: 'Durable turn-end sequence, retained as source evidence.' }, { name: 'timestamp', description: 'Source event time.' }],
+        returns: 'After the idempotent completion fact is durable; unrelated Sessions do not complete initialization.',
       },
       {
         signature: 'learn(tool: string, sessionId: SessionId): Promise<void>',
         description: 'Persist one tool-learning event, independently of availability and execution permissions.',
         parameters: [{ name: 'tool', description: 'Exact current tool name checked by the learning tool against the caller\'s registry.' }, { name: 'sessionId', description: 'Actual learning Session.' }],
         returns: 'After learning and its growth record commit together; repeats do not duplicate them.',
+      },
+      {
+        signature: 'setPersonalDirectory(path: string): Promise<void>',
+        description: 'Record the stable private host directory without replacing an existing location silently.',
+        parameters: [{ name: 'path', description: 'Prepared canonical directory authorized by deployment configuration.' }],
+        returns: 'After the location is durable; a conflicting configured location is refused.',
+      },
+      {
+        signature: 'saveOperator(profile: OperatorIdentity, revision: number, versions: Array<{ id: MemoryId; updatedAt: string }>, changes: MemoryRelabel[]): Promise<number>',
+        description: 'Save explicit operator identity with version-fenced current-memory relabeling.',
+        parameters: [{ name: 'profile', description: 'Authenticated human-authored name and identity.' }, { name: 'revision', description: 'Displayed operator revision, zero before first configuration.' }, { name: 'versions', description: 'Complete memory set captured before inference; concurrent edits refuse publication.' }, { name: 'changes', description: 'Validated wording-only replacements and refreshed embeddings.' }],
+        returns: 'New identity revision; original interpretations remain in version history.',
       },
       {
         signature: 'observe(observation: ObservedInteraction): Promise<LifeEvent>',
@@ -1260,9 +1344,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'scan(sessionId: SessionId, tools: readonly ToolSchema[]): Promise<void>',
-        description: 'Compare real visible tool declarations in one Session scope. Permission remains execution-time policy; declaration changes do not imply tested skill.',
-        parameters: [{ name: 'sessionId', description: 'Scope whose previous observation is compared.' }, { name: 'tools', description: 'Current registry projection after scope restrictions.' }],
-        returns: 'After changed capabilities and their growth history commit together.',
+        description: 'Record the first tool inventory as a baseline, then compare declarations in the same Session. Baselines are observations, not growth; permissions and learned skills remain independent.',
+        parameters: [{ name: 'sessionId', description: 'Scope whose previous observation is compared.' }, { name: 'tools', description: 'Current registry projection before the character\'s learned-tool restriction.' }],
+        returns: 'After the baseline or subsequent capability changes commit with their source events.',
       },
       {
         signature: 'remember(input: MemoryInput): Promise<LifeMemory>',
@@ -1277,9 +1361,21 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'Committed replacement, or undefined if absent.',
       },
       {
-        signature: 'deleteMemory(id: MemoryId): Promise<boolean>',
-        description: 'Delete memory content while retaining an audit fact and its original sources.',
-        parameters: [{ name: 'id', description: 'Memory identifier.' }],
+        signature: 'editMemory(id: MemoryId, draft: MemoryDraft, updatedAt: string | null, maxImplicit: number): Promise<LifeMemory>',
+        description: 'Create a sourced operator candidate or directly edit its current projection without an edit event or revision history.',
+        parameters: [{ name: 'id', description: 'Client-allocated UUID; retaining it makes retries of a new entry idempotent.' }, { name: 'draft', description: 'Editable candidate fields, never caller-supplied source references.' }, { name: 'updatedAt', description: 'Observed version, or null for a new entry.' }, { name: 'maxImplicit', description: 'Non-declarative count budget.' }],
+        returns: 'Committed candidate retaining its identity and earlier sources when edited.',
+      },
+      {
+        signature: 'convertMemory(id: MemoryId, kind: \'declarative\' | \'non-declarative\', updatedAt: string, maxImplicit: number): Promise<LifeMemory>',
+        description: 'Change only the memory layer, retaining content, sources, identity and its embedding.',
+        parameters: [{ name: 'id', description: 'Existing memory.' }, { name: 'kind', description: 'Explicit operator choice.' }, { name: 'updatedAt', description: 'Version observed by the editor; stale conversions are refused.' }, { name: 'maxImplicit', description: 'Whole-life non-declarative count budget.' }],
+        returns: 'Converted memory; an idempotent same-layer request leaves history unchanged.',
+      },
+      {
+        signature: 'deleteMemory(id: MemoryId, updatedAt?: string): Promise<boolean>',
+        description: 'Delete current memory content; automatic deletion records a fact, while operator deletion creates no edit history.',
+        parameters: [{ name: 'id', description: 'Memory identifier.' }, { name: 'updatedAt', description: 'Optional displayed version; when supplied, concurrent edits are refused.' }],
         returns: 'Whether a memory was durably removed.',
       },
       {
@@ -1295,10 +1391,40 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'A detached memory or undefined if absent or deleted.',
       },
       {
-        signature: 'reviewMemory(key: string, changes: MemoryChange[], maxImplicit: number): Promise<void>',
+        signature: 'reviewMemory(key: string, changes: MemoryChange[], maxImplicit: number, experience?: ExperienceChange, evidence?: ReviewEvidence): Promise<void>',
         description: 'Atomically apply an independent writer\'s changes and record a completed review once.',
-        parameters: [{ name: 'key', description: 'Stable source turn or explicit user-memory request key.' }, { name: 'changes', description: 'Validated changes; all references must belong to this life.' }, { name: 'maxImplicit', description: 'Whole-life non-declarative record limit.' }],
+        parameters: [{ name: 'key', description: 'Stable source turn or explicit user-memory request key.' }, { name: 'changes', description: 'Validated changes; all references must belong to this life.' }, { name: 'maxImplicit', description: 'Whole-life non-declarative record limit.' }, { name: 'experience', description: 'Optional remembered event; commits atomically with the derived entries.' }, { name: 'evidence', description: 'Completed user exchange metadata for independent habit support and durable maintenance.' }],
         returns: 'After all changes and the replay marker commit, or no-op on replay.',
+      },
+      {
+        signature: 'setConsolidation(enabled: boolean): Promise<void>',
+        description: 'Persist the operator\'s maintenance preference independently of deployment defaults.',
+        parameters: [{ name: 'enabled', description: 'Whether idle maintenance may run.' }],
+        returns: 'After the preference commits; pending work is retained when disabled.',
+      },
+      {
+        signature: 'requestConsolidation(): Promise<void>',
+        description: 'Request one maintenance pass over current memories, retaining its source Session for the inference audit.',
+        parameters: [],
+        returns: 'After pending work and a fresh retry budget commit; absent conversation evidence is refused.',
+      },
+      {
+        signature: 'consolidate(plan: ConsolidationCommit, maxImplicit: number): Promise<boolean>',
+        description: 'Commit one bounded consolidation with an optimistic revision check and replay marker.',
+        parameters: [{ name: 'plan', description: 'Validated changes and the exact selected memory versions.' }, { name: 'maxImplicit', description: 'Whole-life prompt memory limit.' }],
+        returns: 'Whether the pass committed; concurrent edits leave work pending.',
+      },
+      {
+        signature: 'organizeMemories(request: MemoryOrganizationRequest, changes: OrganizedMemory[], sessionId: SessionId): Promise<LifeMemory[]>',
+        description: 'Atomically replace selected memories with their sourced synthesis.',
+        parameters: [{ name: 'request', description: 'Stable request and exact source versions.' }, { name: 'changes', description: 'Validated, embedded interpretations citing selected memories.' }, { name: 'sessionId', description: 'Durable auxiliary inference audit Session.' }],
+        returns: 'Committed results; retries return the same identities.',
+      },
+      {
+        signature: 'failConsolidation(revision: number, failure: ReviewFailure): Promise<void>',
+        description: 'Retain a safe failed maintenance outcome without discarding pending evidence.',
+        parameters: [{ name: 'revision', description: 'Work revision that failed; superseded work keeps its own retry budget.' }, { name: 'failure', description: 'Classified, redacted diagnostic from the operation owner.' }],
+        returns: 'After the diagnostic commits, or a no-op for superseded work.',
       },
       {
         signature: 'async retrieve(query: MemoryQuery): Promise<LifeMemory[]>',
@@ -1321,6 +1447,140 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'genesisDeliberation',
+    summary: 'Life-wide FIFO for inference, with per-Agent admitted execution and cancellation ownership.',
+    description: 'Life-wide FIFO for inference, with per-Agent admitted execution and cancellation ownership.',
+    methods: [
+      {
+        signature: 'async admit(agent: Agent, messages: UserMessage[], signal: AbortSignal): Promise<UserMessage[]>',
+        description: 'Deliberate before real user input is admitted; preserve the original input and append the logged choice.',
+        parameters: [{ name: 'agent', description: 'Actual conversation scope.' }, { name: 'messages', description: 'Accepted pre-step input from downstream listeners.' }, { name: 'signal', description: 'Current turn cancellation.' }],
+        returns: 'Original input plus one source-tagged choice, or unchanged continuation input.',
+      },
+      {
+        signature: 'async deliberate(agent: Agent, request: { key: string; sourceEventId: LifeEventId }, signal: AbortSignal): Promise<LifeDecision>',
+        description: 'Run one externally triggered autonomous deliberation without a user assignment; enqueue only its chosen response/action.',
+        parameters: [{ name: 'agent', description: 'Idle live Agent receiving logged inference and any chosen follow-up.' }, { name: 'request', description: 'Stable replay key and an existing life event, supplied by a trusted adapter or future scheduler.' }, { name: 'signal', description: 'Caller cancellation; no background wake timer is installed.' }],
+        returns: 'Committed choice. Waiting queues nothing; replay never dispatches the same decision again.',
+      },
+      {
+        signature: 'settle(agent: Agent, interrupted: boolean): Promise<void>',
+        description: 'Record only actual committed assistant/tool outcomes and clear live tool admission.',
+        parameters: [{ name: 'agent', description: 'Agent whose admitted execution is finishing.' }, { name: 'interrupted', description: 'Whether failure, cancellation or disposal interrupted execution.' }],
+        returns: 'After durable settlement; absence of an admission is a no-op.',
+      },
+      {
+        signature: 'observe(sessionId: SessionId, event: SessionEvent): void',
+        description: 'Retain bounded result metadata delivered live; no historical Session reads or result bodies are needed.',
+        parameters: [{ name: 'sessionId', description: 'Actual event owner.' }, { name: 'event', description: 'Committed Session event supplied by the integration.' }],
+      },
+      {
+        signature: 'async close(): Promise<void>',
+        description: 'Cancel auxiliary inference and drain accepted reviews; core storage remains owned by the plugin.',
+        parameters: [],
+        returns: 'After all pending inference operations settle.',
+      },
+    ],
+  },
+  {
+    key: 'genesisMemory',
+    summary: 'Explicit user memory controls; errors retain their actual stage and safe diagnostic.',
+    description: 'Explicit user memory controls; errors retain their actual stage and safe diagnostic.',
+    methods: [
+      {
+        signature: '@Remote({ name: \'generate\', resources: { session: (sessionId: SessionId) => sessionId } }) generate(sessionId: SessionId, messageId: MessageId, kind: MemoryKind, signal: AbortSignal): Promise<boolean>',
+        description: 'Generate selected-layer memories for one durable reply without running the decision model.',
+        parameters: [{ name: 'sessionId', description: 'Open conversation owning the reply.' }, { name: 'messageId', description: 'Completed assistant message.' }, { name: 'kind', description: 'Operator-selected memory layer.' }, { name: 'signal', description: 'Caller cancellation; storage commits already admitted drain.' }],
+        returns: 'Whether changes were saved; repeated requests are idempotent.',
+      },
+      {
+        signature: '@Remote(\'save\') save(id: MemoryId, draft: MemoryDraft, updatedAt: string | null, signal: AbortSignal): Promise<LifeMemory>',
+        description: 'Create a sourced operator candidate or directly update its current fields without an edit event or revision.',
+        parameters: [{ name: 'id', description: 'Client-allocated memory UUID, retained across retries.' }, { name: 'draft', description: 'Editable fields; attribution and sources are assigned by the core.' }, { name: 'updatedAt', description: 'Displayed version, or null when creating.' }, { name: 'signal', description: 'Cancellation before storage admission.' }],
+        returns: 'Accepted memory without its vector cache.',
+      },
+      {
+        signature: '@Remote(\'deleteMemory\') deleteMemory(id: MemoryId, updatedAt: string, signal: AbortSignal): Promise<boolean>',
+        description: 'Delete current memory content after checking the displayed version, without adding an edit event.',
+        parameters: [{ name: 'id', description: 'Memory to remove.' }, { name: 'updatedAt', description: 'Displayed version; stale deletion is refused.' }, { name: 'signal', description: 'Cancellation before storage admission.' }],
+        returns: 'Whether the memory existed and was deleted.',
+      },
+      {
+        signature: '@Remote(\'setConsolidation\') setConsolidation(enabled: boolean, signal: AbortSignal): Promise<void>',
+        description: 'Enable or disable automatic idle consolidation without dropping queued evidence.',
+        parameters: [{ name: 'enabled', description: 'Operator preference, shared across modes and restarts.' }, { name: 'signal', description: 'Cancellation before storage admission.' }],
+        returns: 'After the preference commits and scheduling is reconsidered.',
+      },
+      {
+        signature: '@Remote(\'consolidate\') consolidate(signal: AbortSignal): Promise<boolean>',
+        description: 'Run one explicit consolidation pass using the saved writer and embedding configuration.',
+        parameters: [{ name: 'signal', description: 'Operator cancellation; a conversation also cancels pending inference.' }],
+        returns: 'Whether the pending revision committed; failures retain their specific stage and cause.',
+      },
+      {
+        signature: '@Remote(\'organize\') organize(request: MemoryOrganizationRequest, signal: AbortSignal): Promise<LifeMemory[]>',
+        description: 'Integrate explicitly selected memory versions into one or several new candidates.',
+        parameters: [{ name: 'request', description: 'Stable retry identity, selected versions and optional exact result count.' }, { name: 'signal', description: 'Operator cancellation; admitted primary writes drain.' }],
+        returns: 'Sourced results without vectors, atomically replacing the selection. Inference failures retain originals; storage or cleanup failures require checking the stable request on retry.',
+      },
+      {
+        signature: '@Remote(\'saveOperator\') saveOperator(profile: OperatorIdentity, revision: number, signal: AbortSignal): Promise<number>',
+        description: 'Save explicit operator identity and replace legacy generic role references without changing facts.',
+        parameters: [{ name: 'profile', description: 'Human-authored operator name and identity.' }, { name: 'revision', description: 'Displayed identity revision.' }, { name: 'signal', description: 'Caller cancellation; admitted primary writes drain.' }],
+        returns: 'New revision after identity and all accepted wording replacements commit together.',
+      },
+      {
+        signature: '@Remote(\'convert\') convert(id: MemoryId, kind: MemoryKind, updatedAt: string, signal: AbortSignal): Promise<LifeMemory>',
+        description: 'Convert one existing memory between declarative and non-declarative storage.',
+        parameters: [{ name: 'id', description: 'Existing sourced memory.' }, { name: 'kind', description: 'Desired layer; content and sources stay fixed.' }, { name: 'updatedAt', description: 'Displayed memory version.' }, { name: 'signal', description: 'Caller cancellation before storage admission.' }],
+        returns: 'Committed memory without its embedding cache.',
+      },
+    ],
+  },
+  {
+    key: 'genesisRecords',
+    summary: 'Operator API; disabling recording keeps the namespace mounted with an explicit unavailable catalog.',
+    description: 'Operator API; disabling recording keeps the namespace mounted with an explicit unavailable catalog.',
+    methods: [
+      {
+        signature: '@Remote(\'catalog\') catalog(signal: AbortSignal): Promise<WritingCatalog | null>',
+        description: 'Read record categories and effective writing limits.',
+        parameters: [{ name: 'signal', description: 'Caller cancellation.' }],
+        returns: 'Categories and limits, or null when recording is disabled.',
+      },
+      {
+        signature: '@Remote(\'search\') search(query: WritingQuery, signal: AbortSignal): Promise<WritingSearch>',
+        description: 'Search writing titles and content without model calls.',
+        parameters: [{ name: 'query', description: 'Bounded substring, type and time filters.' }, { name: 'signal', description: 'Caller cancellation.' }],
+        returns: 'Matching records with snippets and continuation offset.',
+      },
+      {
+        signature: '@Remote(\'read\') read(id: WritingId, offset: number, signal: AbortSignal): Promise<WritingRead>',
+        description: 'Read one revision in bounded text chunks.',
+        parameters: [{ name: 'id', description: 'Stable record id.' }, { name: 'offset', description: 'Returned continuation position, initially zero.' }, { name: 'signal', description: 'Caller cancellation.' }],
+        returns: 'One bounded text chunk and original attribution.',
+      },
+      {
+        signature: '@Remote(\'edit\') edit(id: WritingId, draft: WritingDraft, revision: number, signal: AbortSignal): Promise<number>',
+        description: 'Replace current fields while retaining original creation attribution.',
+        parameters: [{ name: 'id', description: 'Record to edit.' }, { name: 'draft', description: 'Operator replacement text and type.' }, { name: 'revision', description: 'Displayed revision.' }, { name: 'signal', description: 'Cancellation before commit admission.' }],
+        returns: 'New revision; rejected edits retain the caller’s draft.',
+      },
+      {
+        signature: '@Remote(\'deleteRecord\') deleteRecord(id: WritingId, revision: number, signal: AbortSignal): Promise<void>',
+        description: 'Erase current writing text and its generated Markdown file.',
+        parameters: [{ name: 'id', description: 'Record to delete.' }, { name: 'revision', description: 'Displayed revision.' }, { name: 'signal', description: 'Cancellation before admission.' }],
+        returns: 'After current text and generated file removal; Session history is independent.',
+      },
+      {
+        signature: '@Remote(\'saveType\') saveType(id: WritingTypeId | null, name: string, enabled: boolean, revision: number, signal: AbortSignal): Promise<WritingType>',
+        description: 'Create or update an operator-managed writing category.',
+        parameters: [{ name: 'id', description: 'Existing type id or null for a new system-generated id.' }, { name: 'name', description: 'Display name.' }, { name: 'enabled', description: 'Permit new writes.' }, { name: 'revision', description: 'Displayed type revision, zero for creation.' }, { name: 'signal', description: 'Cancellation before admission.' }],
+        returns: 'Saved type without relocating records on rename.',
+      },
+    ],
+  },
+  {
     key: 'genesisStatus',
     summary: 'Sample shared life state and initialize its name without changing its identity or permissions.',
     description: 'Sample shared life state and initialize its name without changing its identity or permissions.',
@@ -1330,6 +1590,66 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Check configured chat/reviewer/writer routes and the embedding service, then name this existing life once. Credentials use the existing provider settings or account sign-in; no secrets are accepted or stored here.',
         parameters: [{ name: 'name', description: 'User-chosen name, retained across Sessions and restarts.' }, { name: 'signal', description: 'Caller cancellation; an admitted storage commit may still finish after cancellation.' }],
         returns: 'After naming commits; errors leave initialization pending unless a storage write has uncertain outcome.',
+      },
+      {
+        signature: '@Remote(\'saveModels\') async saveModels(settings: MemoryModelsSettings, revision: number, signal: AbortSignal): Promise<number>',
+        description: 'Persist independent memory routes without credentials or profile-overlay precedence.',
+        parameters: [{ name: 'settings', description: 'Decision and writer routes.' }, { name: 'revision', description: 'Displayed revision; stale changes are refused.' }, { name: 'signal', description: 'Caller cancellation; admitted writes still drain.' }],
+        returns: 'Committed revision.',
+      },
+      {
+        signature: '@Remote(\'testModel\') async testModel(role: \'decision\' | \'writer\', signal: AbortSignal): Promise<void>',
+        description: 'Check a saved provider route, or authenticate against an endpoint\'s model catalog without sending conversation data.',
+        parameters: [{ name: 'role', description: 'Independent decision or writer configuration to check.' }, { name: 'signal', description: 'Caller cancellation; the memory timeout bounds network work.' }],
+        returns: 'After provider preparation or a valid model catalog containing the selected model.',
+      },
+      {
+        signature: '@Remote(\'greet\') async greet(sessionId: SessionId, language: \'en\' | \'zh\', signal: AbortSignal): Promise<SessionId>',
+        description: 'Start the logged built-in awakening in an existing blank life-mode Session, once per life.',
+        parameters: [{ name: 'sessionId', description: 'Session created through the supported Web Session API.' }, { name: 'language', description: 'UI language used only for the first greeting.' }, { name: 'signal', description: 'Caller cancellation before admission; queued work belongs to the Agent thereafter.' }],
+        returns: 'Canonical first Session, including when another browser already started it.',
+      },
+      {
+        signature: '@Remote(\'saveEmotionSettings\') async saveEmotionSettings(settings: EmotionSettings, revision: number, signal: AbortSignal): Promise<number>',
+        description: 'Save complete operator emotion rules without changing life identity or permissions.',
+        parameters: [{ name: 'settings', description: 'JSON-validated enabled state, appraisal bounds and recovery parameters.' }, { name: 'revision', description: 'Last displayed emotion revision; stale drafts are rejected.' }, { name: 'signal', description: 'Caller cancellation; admitted writes still drain.' }],
+        returns: 'Committed revision; refresh status before making a subsequent edit.',
+      },
+      {
+        signature: '@Remote(\'adjustEmotion\') async adjustEmotion(adjustment: EmotionAdjustment, revision: number, signal: AbortSignal): Promise<number>',
+        description: 'Apply an explicit operator adjustment, recorded separately from model appraisals.',
+        parameters: [{ name: 'adjustment', description: 'Absolute intensities and the operator\'s reason.' }, { name: 'revision', description: 'Last displayed revision; stale drafts cannot overwrite newer state.' }, { name: 'signal', description: 'Caller cancellation; accepted writes complete before disposal.' }],
+        returns: 'Committed revision; the next logged request context reflects this adjustment.',
+      },
+      {
+        signature: '@Remote(\'adjustRelationship\') async adjustRelationship(adjustment: RelationshipAdjustment, revision: number, signal: AbortSignal): Promise<number>',
+        description: 'Adjust the persistent single-operator relationship without creating conversation evidence.',
+        parameters: [{ name: 'adjustment', description: 'Absolute values, display label and operator reason.' }, { name: 'revision', description: 'Last sampled emotion revision; stale edits are refused.' }, { name: 'signal', description: 'Caller cancellation; accepted atomic writes drain.' }],
+        returns: 'Committed revision; refresh the shared status after saving.',
+      },
+      {
+        signature: '@Remote(\'retryMemory\') async retryMemory(sessionId: SessionId, signal: AbortSignal): Promise<void>',
+        description: 'Retry the latest failed review while its live evidence remains available.',
+        parameters: [{ name: 'sessionId', description: 'Conversation that owns the failed review.' }, { name: 'signal', description: 'Caller cancellation; no new chat reply is generated.' }],
+        returns: 'After the retry settles; restart or newer-turn evidence requires a new conversation turn.',
+      },
+      {
+        signature: '@Remote(\'saveEmbedding\') async saveEmbedding(settings: EmbeddingSettings, revision: number, signal: AbortSignal): Promise<number>',
+        description: 'Save nonsecret embedding preferences independently of command-line profile overlays.',
+        parameters: [{ name: 'settings', description: 'Validated endpoint, model, dimensions and optional credential reference.' }, { name: 'revision', description: 'Revision from the displayed status sample.' }, { name: 'signal', description: 'Caller cancellation; an admitted write drains even if cancelled later.' }],
+        returns: 'The committed revision, after durable storage has accepted the update.',
+      },
+      {
+        signature: '@Remote(\'testEmbedding\') async testEmbedding(signal: AbortSignal): Promise<void>',
+        description: 'Probe the saved embedding configuration without changing identity or memories.',
+        parameters: [{ name: 'signal', description: 'Caller cancellation; the configured memory deadline bounds the request.' }],
+        returns: 'After one response with the expected vector dimensions has been verified.',
+      },
+      {
+        signature: '@Remote(\'memories\') async memories(query: string, signal: AbortSignal): Promise<LifeStatus[\'memories\']>',
+        description: 'Browse or search stored memory text without requiring an embedding request.',
+        parameters: [{ name: 'query', description: 'Literal search text, bounded by the configured response budget.' }, { name: 'signal', description: 'Caller cancellation.' }],
+        returns: 'Sourced candidate memories within the configured item and response limits, without vectors.',
       },
       {
         signature: '@Remote(\'inspect\') async inspect(signal: AbortSignal): Promise<LifeStatus>',
@@ -2134,6 +2454,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Resolve the complete policy for one capability call. An approved explicit mode outranks the session\'s last `sandbox/mode` event, which outranks the deployment default. A session cwd is its workspace-write boundary; the configured root is the fallback for agentless calls and sessions without a cwd.',
         parameters: [{ name: 'request', description: 'optional session and approved mode override.' }],
         returns: 'the fully resolved per-call mode and absolute workspace root.',
+      },
+      {
+        signature: 'registerWritableDirectory(path: string, enabled: () => boolean): () => void',
+        description: 'Register one explicitly authorized host directory without widening read-only policy.',
+        parameters: [{ name: 'path', description: 'Existing absolute directory; its canonical identity is pinned until disposal.' }, { name: 'enabled', description: 'Synchronous availability predicate, never authority from model or external data.' }],
+        returns: 'Disposer withdrawing this grant from future resolutions; already-confined processes retain launch-time permissions until exit. Callers register it through their own effect scope.',
       },
       {
         signature: 'overrideOf(session: Session): SandboxMode | undefined',
@@ -4844,6 +5170,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface AfterScheduleRecord {\n    readonly id: ScheduleId;\n    readonly kind: \'after\';\n    readonly title: string;\n    readonly prompt: string;\n    readonly afterSeconds: number;\n    readonly scheduledAt: string;\n}',
   },
   {
+    name: 'AgencyState',
+    declaration: 'export type AgencyState = z.infer<typeof agencySchema>;',
+  },
+  {
     name: 'Agent',
     declaration: 'export interface Agent {\n    readonly id: SessionId;\n}',
   },
@@ -5124,10 +5454,6 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface ButtonProps {\n    readonly label: string;\n    readonly hotkey?: string | undefined;\n    readonly disabled?: boolean | undefined;\n    readonly onPress?: (() => unknown) | undefined;\n}',
   },
   {
-    name: 'CapabilityState',
-    declaration: 'export type CapabilityState = z.infer<typeof capabilitySchema>;',
-  },
-  {
     name: 'ChangeResult',
     declaration: 'export interface ChangeResult {\n    changed: boolean;\n    application: \'applied\' | \'restart-required\' | \'overridden\' | \'failed\' | \'cancelled\';\n    restartReason?: RestartReason;\n    stage: \'install\' | \'enable\' | \'remove\';\n    target: string;\n    enabled?: boolean;\n    error?: ManagementError;\n    warnings?: string[];\n    packageResult?: PackageResult;\n    bundle?: string;\n    version?: string;\n    pendingBuilds?: string[];\n    approvedBuilds?: string[];\n    registries?: Registry[];\n    failedAt?: \'registry\' | \'spec-host\';\n}',
   },
@@ -5289,7 +5615,15 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ConnectionTrustRequest',
-    declaration: 'export interface ConnectionTrustRequest {\n    readonly headers: Headers | Readonly<Record<string, string | readonly string[] | undefined>>;\n}',
+    declaration: 'export interface ConnectionTrustRequest {\n    readonly headers: Headers | Readonly<Record<string, string | readonly string[] | undefined>>;\n    readonly socket?: {\n        readonly remoteAddress?: string | undefined;\n        readonly localAddress?: string | undefined;\n    };\n}',
+  },
+  {
+    name: 'ConsolidationChange',
+    declaration: 'export interface ConsolidationChange {\n    id?: MemoryId;\n    input: MemoryInput;\n    embedding: MemoryEmbedding;\n    habit?: MemoryHabit;\n    experienceIds: MemoryId[];\n}',
+  },
+  {
+    name: 'ConsolidationCommit',
+    declaration: 'export interface ConsolidationCommit {\n    revision: number;\n    versions: Array<{\n        id: MemoryId;\n        updatedAt: string;\n    }>;\n    changes: ConsolidationChange[];\n}',
   },
   {
     name: 'ContentBlockMap',
@@ -5452,6 +5786,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface DailyScheduleRecord {\n    readonly id: ScheduleId;\n    readonly kind: \'daily\';\n    readonly title: string;\n    readonly prompt: string;\n    readonly time: string;\n    readonly timeZone: string;\n    readonly scheduledAt: string;\n}',
   },
   {
+    name: 'DecisionId',
+    declaration: 'export type DecisionId = Branded<\'GenesisDecisionId\'>;',
+  },
+  {
     name: 'DeepSeekLlmApiExtensionMap',
     declaration: 'export interface DeepSeekLlmApiExtensionMap {\n}',
   },
@@ -5466,6 +5804,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'DeepSeekLlmApiJson',
     declaration: 'export type DeepSeekLlmApiJson = null | boolean | number | string | DeepSeekLlmApiJson[] | {\n    [key: string]: DeepSeekLlmApiJson;\n};',
+  },
+  {
+    name: 'DeliberationCommit',
+    declaration: 'export interface DeliberationCommit {\n    key: string;\n    sessionId: SessionId;\n    trigger: \'request\' | \'event\';\n    revision: number;\n    sourceEventIds: LifeEventId[];\n    memoryIds: MemoryId[];\n    interestIds: InterestId[];\n    plan: DeliberationPlan;\n}',
+  },
+  {
+    name: 'DeliberationPlan',
+    declaration: 'export type DeliberationPlan = z.infer<typeof deliberationPlanSchema>;',
   },
   {
     name: 'DeliveryRetentionBounds',
@@ -5584,6 +5930,42 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface EditGoalRequest {\n    readonly objective?: string;\n    readonly maxGoalRounds?: number;\n}',
   },
   {
+    name: 'EmbeddingSettings',
+    declaration: 'export interface EmbeddingSettings {\n    url: string;\n    model: string;\n    dimensions: number;\n    keyRef?: string | undefined;\n}',
+  },
+  {
+    name: 'EmotionAdjustment',
+    declaration: 'export type EmotionAdjustment = z.infer<typeof emotionAdjustmentSchema>;',
+  },
+  {
+    name: 'EmotionAppraisal',
+    declaration: 'export type EmotionAppraisal = z.infer<typeof appraisalSchema>;',
+  },
+  {
+    name: 'EmotionCurrent',
+    declaration: 'export type EmotionCurrent = z.infer<typeof emotionCurrentSchema>;',
+  },
+  {
+    name: 'EmotionDialogue',
+    declaration: 'export type EmotionDialogue = z.infer<typeof projectionSchema>;',
+  },
+  {
+    name: 'EmotionHistoryEntry',
+    declaration: 'export interface EmotionHistoryEntry {\n    id: LifeEventId;\n    timestamp: string;\n    source: \'system\' | \'user\' | \'agent\';\n    kind: \'initialized\' | \'configured\' | \'reviewed\' | \'adjusted\' | \'upgraded\' | \'relationship-adjusted\';\n    reason: string;\n    current: EmotionCurrent;\n    relationship?: RelationshipState | null;\n    targets?: Partial<Record<keyof EmotionCurrent, string>> | undefined;\n    appraisal?: EmotionAppraisal;\n    effects?: {\n        needs?: Record<string, number> | undefined;\n        current: Record<string, number>;\n        mood: Record<string, number>;\n        relationship: Record<string, number>;\n        repetitionFactor: number;\n        moodEligible: boolean;\n        repeated: boolean;\n    };\n    mood: Mood;\n    needs: Needs;\n    sourceEventIds: LifeEventId[];\n}',
+  },
+  {
+    name: 'EmotionSettings',
+    declaration: 'export type EmotionSettings = z.infer<typeof emotionSettingsSchema>;',
+  },
+  {
+    name: 'EmotionState',
+    declaration: 'export type EmotionState = z.infer<typeof emotionStateSchema>;',
+  },
+  {
+    name: 'EmotionUpdate',
+    declaration: 'export type EmotionUpdate = z.infer<typeof emotionUpdateSchema>;',
+  },
+  {
     name: 'EncodedFileAttachment',
     declaration: 'export interface EncodedFileAttachment {\n    data: string;\n    name?: string;\n}',
   },
@@ -5594,6 +5976,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'EncodedImageAttachment',
     declaration: 'export interface EncodedImageAttachment {\n    mediaType: ImageMediaType;\n    data: string;\n    name?: string;\n}',
+  },
+  {
+    name: 'EndpointRoute',
+    declaration: 'export interface EndpointRoute {\n    kind: \'jev\' | \'openai\';\n    url: string;\n    model: string;\n    keyRef?: string | undefined;\n}',
   },
   {
     name: 'EpochHeader',
@@ -5614,6 +6000,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'EveryScheduleRecord',
     declaration: 'export interface EveryScheduleRecord {\n    readonly id: ScheduleId;\n    readonly kind: \'every\';\n    readonly title: string;\n    readonly prompt: string;\n    readonly everySeconds: number;\n    readonly scheduledAt: string;\n}',
+  },
+  {
+    name: 'ExperienceChange',
+    declaration: 'export interface ExperienceChange {\n    id?: MemoryId;\n    input: MemoryInput;\n    details: MemoryExperience;\n    embedding: MemoryEmbedding;\n}',
   },
   {
     name: 'FeedbackCategory',
@@ -5764,10 +6154,6 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface GrantRecord {\n    readonly kind: \'grant\';\n    readonly payload: unknown;\n}',
   },
   {
-    name: 'GrowthRecord',
-    declaration: 'export type GrowthRecord = z.infer<typeof growthSchema>;',
-  },
-  {
     name: 'HookBudget',
     declaration: 'export interface HookBudget {\n    readonly ms: number;\n    readonly remainingMs: number;\n}',
   },
@@ -5862,6 +6248,26 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'InstallSpecKind',
     declaration: 'export type InstallSpecKind = \'registry\' | \'path\' | \'git\' | \'tarball\';',
+  },
+  {
+    name: 'InterestDialogue',
+    declaration: 'export type InterestDialogue = z.infer<typeof projectionSchema>;',
+  },
+  {
+    name: 'InterestHistoryEntry',
+    declaration: 'export interface InterestHistoryEntry {\n    id: LifeEventId;\n    interestId: InterestId;\n    timestamp: string;\n    topic: string;\n    before: LifeInterest[\'stage\'] | null;\n    after: LifeInterest[\'stage\'];\n    signal: LifeInterest[\'evidence\'][number][\'signal\'];\n    reason: string;\n    sourceEventIds: LifeEventId[];\n}',
+  },
+  {
+    name: 'InterestId',
+    declaration: 'export type InterestId = Branded<\'GenesisInterestId\'>;',
+  },
+  {
+    name: 'InterestProposal',
+    declaration: 'export type InterestProposal = z.infer<typeof proposalSchema>;',
+  },
+  {
+    name: 'InterestSummary',
+    declaration: 'export type InterestSummary = Pick<LifeInterest, \'id\' | \'topic\' | \'stage\' | \'reason\' | \'createdAt\' | \'updatedAt\'> & {\n    evidenceCount: number;\n    sourceEventIds: LifeEventId[];\n};',
   },
   {
     name: 'InternalScheduleError',
@@ -6044,12 +6450,28 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface KvUnitDescriptor {\n    readonly name: string;\n    readonly version: number;\n    readonly tables: readonly string[];\n    readonly hasGlobal: boolean;\n    readonly layout?: \'single\' | \'per-record\';\n    readonly compatibleVersions?: readonly number[];\n}',
   },
   {
+    name: 'LifeDecision',
+    declaration: 'export type LifeDecision = AgencyState[\'decisions\'][number];',
+  },
+  {
     name: 'LifeEvent',
     declaration: 'export type LifeEvent = z.infer<typeof eventSchema>;',
   },
   {
+    name: 'LifeEventId',
+    declaration: 'export type LifeEventId = Branded<\'GenesisLifeEventId\'>;',
+  },
+  {
+    name: 'LifeGoalId',
+    declaration: 'export type LifeGoalId = Branded<\'GenesisLifeGoalId\'>;',
+  },
+  {
     name: 'LifeIdentity',
     declaration: 'export type LifeIdentity = z.infer<typeof identitySchema>;',
+  },
+  {
+    name: 'LifeInterest',
+    declaration: 'export type LifeInterest = z.infer<typeof interestSchema>;',
   },
   {
     name: 'LifeMemory',
@@ -6061,7 +6483,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'LifeStatus',
-    declaration: 'export interface LifeStatus {\n    setup?: {\n        phase: \'credentials\' | \'naming\' | \'ready\';\n    };\n    identity: LifeIdentity;\n    sampledAt: string;\n    runtime: {\n        platform: string;\n        node: string;\n        liveSessions: number;\n    };\n    counts: {\n        events: number;\n        memories: number;\n        growth: number;\n    };\n    capabilities: Array<{\n        sessionId: SessionId;\n        capability: CapabilityState;\n    }>;\n    memories: LifeMemory[];\n    growth: GrowthRecord[];\n    omitted: {\n        capabilities: number;\n        memories: number;\n        growth: number;\n    };\n}',
+    declaration: 'export interface LifeStatus {\n    operator?: {\n        name: string;\n        identity: string;\n        revision: number;\n    };\n    organization?: {\n        selectionLimit: number;\n        maxResults: number;\n    };\n    emotion?: EmotionState & {\n        settings: EmotionSettings;\n        history: EmotionHistoryEntry[];\n        omitted: number;\n        review?: ReviewOutcome;\n    };\n    interest?: {\n        entries: InterestSummary[];\n        omitted: number;\n        history: InterestHistoryEntry[];\n        historyOmitted: number;\n        review?: ReviewOutcome;\n    };\n    models?: MemoryModelsSettings & {\n        revision: number;\n        keys: Record<\'decision\' | \'writer\', {\n            configured: boolean;\n            writable: boolean;\n        }>;\n    };\n    consolidation?: MemoryConsolidation & {\n        enabled: boolean;\n        maxFailures: number;\n        minHabitSupport: number;\n    };\n    review?: ReviewOutcome;\n    embedding?: EmbeddingSettings & {\n        revision: number;\n        keyConfigured: boolean;\n        keyWritable: boolean;\n    };\n    setup?: {\n        phase: \'credentials\' | \'naming\' | \'conversation\' | \'ready\';\n        firstSessionId?: SessionId;\n    };\n    identity: LifeIdentity;\n    sampledAt: string;\n    runtime: {\n        platform: string;\n        node: string;\n        liveSessions: number;\n    };\n    counts: {\n        events: number;\n        memories: number;\n        growth: number;\n    };\n    capabilities: Array<{\n        sessionId: SessionId;\n     /* …truncated — full shape in source */',
   },
   {
     name: 'LlmAdapter',
@@ -6292,8 +6714,24 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type MemoryChange = {\n    action: \'delete\';\n    id: MemoryId;\n} | {\n    action: \'upsert\';\n    id?: MemoryId;\n    input: MemoryInput;\n    embedding: MemoryEmbedding;\n};',
   },
   {
+    name: 'MemoryConsolidation',
+    declaration: 'export type MemoryConsolidation = z.infer<typeof consolidationSchema>;',
+  },
+  {
+    name: 'MemoryDraft',
+    declaration: 'export type MemoryDraft = Pick<LifeMemory, \'content\' | \'category\' | \'importance\' | \'confidence\'> & {\n    kind: MemoryKind;\n};',
+  },
+  {
     name: 'MemoryEmbedding',
     declaration: 'export type MemoryEmbedding = z.infer<typeof embeddingSchema>;',
+  },
+  {
+    name: 'MemoryExperience',
+    declaration: 'export type MemoryExperience = z.infer<typeof experienceSchema>;',
+  },
+  {
+    name: 'MemoryHabit',
+    declaration: 'export type MemoryHabit = z.infer<typeof habitSchema>;',
   },
   {
     name: 'MemoryId',
@@ -6304,8 +6742,28 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type MemoryInput = z.infer<typeof memoryInputSchema>;',
   },
   {
+    name: 'MemoryKind',
+    declaration: 'export type MemoryKind = \'declarative\' | \'non-declarative\';',
+  },
+  {
+    name: 'MemoryModelsSettings',
+    declaration: 'export interface MemoryModelsSettings {\n    decision: ProviderRoute | (EndpointRoute & {\n        kind: \'jev\';\n        threshold: number;\n    });\n    writer: ProviderRoute | (EndpointRoute & {\n        kind: \'openai\';\n    });\n}',
+  },
+  {
+    name: 'MemoryOrganizationId',
+    declaration: 'export type MemoryOrganizationId = Branded<\'GenesisMemoryOrganizationId\'>;',
+  },
+  {
+    name: 'MemoryOrganizationRequest',
+    declaration: 'export interface MemoryOrganizationRequest {\n    id: MemoryOrganizationId;\n    sources: Array<{\n        id: MemoryId;\n        updatedAt: string;\n    }>;\n    targetCount: number | null;\n}',
+  },
+  {
     name: 'MemoryQuery',
     declaration: 'export interface MemoryQuery {\n    text: string;\n    category?: LifeMemory[\'category\'];\n    after?: string;\n    before?: string;\n    limit: number;\n    chars: number;\n}',
+  },
+  {
+    name: 'MemoryRelabel',
+    declaration: 'export interface MemoryRelabel {\n    id: MemoryId;\n    content: string;\n    embedding: MemoryEmbedding;\n    habit?: {\n        cue: string;\n        response: string;\n    };\n    topics?: string[];\n}',
   },
   {
     name: 'Message',
@@ -6464,8 +6922,16 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type ModTier = \'prepend\' | \'user\' | \'append\' | \'builtin\' | \'core\';',
   },
   {
+    name: 'Mood',
+    declaration: 'export type Mood = z.infer<typeof moodSchema>;',
+  },
+  {
     name: 'NativeFileApplication',
     declaration: 'export interface NativeFileApplication {\n    readonly id: string;\n    readonly name: string;\n    readonly default: boolean;\n    readonly icon: string | null;\n}',
+  },
+  {
+    name: 'Needs',
+    declaration: 'export type Needs = z.infer<typeof needsSchema>;',
   },
   {
     name: 'NotFutureError',
@@ -6516,8 +6982,16 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type OneShotScheduleRecord = AfterScheduleRecord | AtScheduleRecord;',
   },
   {
+    name: 'OperatorIdentity',
+    declaration: 'export type OperatorIdentity = z.infer<typeof operatorIdentitySchema>;',
+  },
+  {
     name: 'OptionalSessionSeq',
     declaration: 'export type OptionalSessionSeq = SessionSeq | null;',
+  },
+  {
+    name: 'OrganizedMemory',
+    declaration: 'export interface OrganizedMemory {\n    input: MemoryInput;\n    embedding: MemoryEmbedding;\n    evidenceIds: MemoryId[];\n}',
   },
   {
     name: 'OTelEventRecord',
@@ -6776,6 +7250,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type ProviderRequestId = Branded<\'ProviderRequestId\'>;',
   },
   {
+    name: 'ProviderRoute',
+    declaration: 'export interface ProviderRoute {\n    kind: \'provider\';\n    provider: string;\n    model: string;\n}',
+  },
+  {
     name: 'PrunedEntry',
     declaration: 'export interface PrunedEntry {\n    readonly originalSeq: SessionSeq;\n    readonly replacementSeq: SessionSeq;\n    readonly callId: ToolCallId;\n    readonly charsBefore: number;\n    readonly charsAfter: number;\n}',
   },
@@ -6858,6 +7336,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'Registry',
     declaration: 'export type Registry = string | null;',
+  },
+  {
+    name: 'RelationshipAdjustment',
+    declaration: 'export type RelationshipAdjustment = z.infer<typeof relationshipAdjustmentSchema>;',
+  },
+  {
+    name: 'RelationshipState',
+    declaration: 'export type RelationshipState = z.infer<typeof relationshipSchema>;',
   },
   {
     name: 'Reload',
@@ -7016,6 +7502,22 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface ResumeAgentOptions {\n    readonly resumeSessionId: SessionId;\n    readonly parentAgent?: Agent;\n    readonly agentOptions?: AgentOptions;\n    readonly signal?: AbortSignal;\n    readonly setup?: AgentSetup;\n}',
   },
   {
+    name: 'ReviewEvidence',
+    declaration: 'export interface ReviewEvidence {\n    sessionId: SessionId;\n    turn: number;\n    userEventIds: LifeEventId[];\n}',
+  },
+  {
+    name: 'ReviewFailure',
+    declaration: 'export interface ReviewFailure {\n    stage: ReviewStage;\n    code: string;\n    message: string;\n}',
+  },
+  {
+    name: 'ReviewOutcome',
+    declaration: 'export type ReviewOutcome = {\n    sessionId: SessionId;\n    turn: number;\n    completedAt?: string;\n    decision?: {\n        probability: number;\n        threshold: number;\n    };\n} & ({\n    state: \'saved\' | \'skipped\';\n} | {\n    state: \'failed\';\n    failure: ReviewFailure;\n});',
+  },
+  {
+    name: 'ReviewStage',
+    declaration: 'export type ReviewStage = \'evidence\' | \'configuration\' | \'decision\' | \'retrieval\' | \'writer\' | \'embedding\' | \'storage\';',
+  },
+  {
     name: 'RpcId',
     declaration: 'export type RpcId = Branded<\'rpc-id\'>;',
   },
@@ -7029,7 +7531,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SandboxExecutionPolicy',
-    declaration: 'export interface SandboxExecutionPolicy {\n    mode: SandboxMode;\n    workspaceRoot: string;\n    sessionId?: SessionId;\n}',
+    declaration: 'export interface SandboxExecutionPolicy {\n    mode: SandboxMode;\n    workspaceRoot: string;\n    additionalWritableRoots?: readonly string[];\n    sessionId?: SessionId;\n}',
   },
   {
     name: 'SandboxMode',
@@ -9058,6 +9560,46 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'WorkspaceView',
     declaration: 'export interface WorkspaceView {\n    readonly workspaceId: WorkspaceId;\n    readonly path: string;\n    readonly title: string;\n    readonly sessionIds: readonly SessionId[];\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
+  },
+  {
+    name: 'WritingCatalog',
+    declaration: 'export interface WritingCatalog {\n    types: WritingType[];\n    count: number;\n    revision: number;\n    limits: {\n        titleChars: number;\n        contentChars: number;\n        typeChars: number;\n    };\n}',
+  },
+  {
+    name: 'WritingDraft',
+    declaration: 'export interface WritingDraft {\n    title: string;\n    content: string;\n    typeId: WritingTypeId;\n}',
+  },
+  {
+    name: 'WritingEntry',
+    declaration: 'export type WritingEntry = z.infer<typeof entrySchema>;',
+  },
+  {
+    name: 'WritingId',
+    declaration: 'export type WritingId = Branded<\'GenesisWritingId\'>;',
+  },
+  {
+    name: 'WritingMatch',
+    declaration: 'export interface WritingMatch extends Omit<WritingEntry, \'source\' | \'content\'> {\n    content: string;\n    truncated: boolean;\n    matchedFields: Array<\'title\' | \'content\'>;\n}',
+  },
+  {
+    name: 'WritingQuery',
+    declaration: 'export interface WritingQuery {\n    text?: string;\n    typeId?: WritingTypeId;\n    after?: string;\n    before?: string;\n    offset?: number;\n}',
+  },
+  {
+    name: 'WritingRead',
+    declaration: 'export interface WritingRead extends Omit<WritingEntry, \'content\'> {\n    content: string;\n    offset: number;\n    nextOffset: number | null;\n}',
+  },
+  {
+    name: 'WritingSearch',
+    declaration: 'export interface WritingSearch {\n    items: WritingMatch[];\n    total: number;\n    nextOffset: number | null;\n    revision: number;\n}',
+  },
+  {
+    name: 'WritingType',
+    declaration: 'export type WritingType = z.infer<typeof typeSchema>;',
+  },
+  {
+    name: 'WritingTypeId',
+    declaration: 'export type WritingTypeId = Branded<\'GenesisWritingTypeId\'>;',
   },
 ]
 

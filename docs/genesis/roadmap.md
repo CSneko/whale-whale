@@ -14,7 +14,7 @@ The next development steps build on actual life facts and sourced candidate memo
 
 ## Later phases
 
-Phase 2 can add event-driven emotion and preference simulations with explicit state and evidence. Phase 3 adds motives and goals; Phase 4 adds negotiation and decisions while keeping permissions independent. Phase 5 may use the existing schedule system for controlled awakening. Phase 6 adds reflection and skill learning; Phase 7 adds reviewed self-improvement.
+Optional [emotion appraisal](emotion.md) and [experience-derived interests](interest.md) connect to [motivation and deliberation](motivation.md), with persistent goals, independent choices and a trusted event entry. Later work can use the existing scheduler for controlled awakening, followed by reflection, skill development and reviewed self-improvement.
 
 Computer operation, video creation and external-site interaction require separate capabilities and explicit authorization. Nothing in Phase 1 installs them or grants publishing permission.
 

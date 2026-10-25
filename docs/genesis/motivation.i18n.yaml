@@ -1,0 +1,28 @@
+# Bilingual-pair consistency record for motivation.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/genesis/motivation.md
+/genesis-motivation-and-deliberation:
+  en: d96eb80d1c59040b
+  zh: cc5c62a5ecc42a1e
+/genesis-motivation-and-deliberation/summary:
+  en: 326b9cc36e31d920
+  zh: 1ed0093775b51c6a
+/genesis-motivation-and-deliberation/enable:
+  en: 89d865e3b813ee1d
+  zh: 6a480e7cf522f828
+/genesis-motivation-and-deliberation/persistent-state:
+  en: 8ed8bdb95426e414
+  zh: e4a3b5d20083cf12
+/genesis-motivation-and-deliberation/request-decisions:
+  en: 221cc61327b7c436
+  zh: 7746cbbab82f593e
+/genesis-motivation-and-deliberation/autonomous-entry-and-outcomes:
+  en: bbc0efd73f549575
+  zh: 828dee2ca6883b26
+/genesis-motivation-and-deliberation/limits-and-extension:
+  en: fc9d346e1e96cf37
+  zh: 1780e6241baea814
+/genesis-motivation-and-deliberation/dev-note:
+  en: b75c8458928b72b9
+  zh: 45e76642489dcc3c

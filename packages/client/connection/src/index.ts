@@ -11,6 +11,8 @@ import { CONNECT_PATH } from './connect-protocol.ts'
 import { bridge, DEFAULT_MAX_REQUEST_BODY_BYTES } from './http-bridge.ts'
 import { assertTrustedAuthority } from './api-request-trust.ts'
 import { BrowserAuth } from './browser-auth.ts'
+import { LOGIN_PATH, type KeyLoginConfig } from './key-login.ts'
+import { isTrustedApiRequest } from './api-request-trust.ts'
 import { HostConnectionService } from './rpc-host.ts'
 import { ConnectionRecoveryConfigSchema, resolveConnectionConfig, type ConnectionRecoveryConfig } from './recovery-config.ts'
 
@@ -94,6 +96,8 @@ export const inject = ['credentials']
 
 /** Browser authentication, request limits, and connection recovery configuration. */
 export interface ConnectionConfig {
+  /** Optional private key-file login bound to client IP and this process; absence retains the launch-token carrier. */
+  keyLogin?: KeyLoginConfig | undefined
   /** Browser recovery timing, injected into each served page. */
   recovery?: ConnectionRecoveryConfig
   /**
@@ -109,7 +113,14 @@ export interface ConnectionConfig {
   maxRequestBodyBytes?: number
 }
 
-export const Config: z<ConnectionConfig> = z.object({
+export const Config: z<Omit<ConnectionConfig, 'keyLogin'> & { keyLogin?: (Partial<KeyLoginConfig> & Pick<KeyLoginConfig, 'keyFile'>) | undefined }, ConnectionConfig> = z.object({
+  keyLogin: z.union([z.const(undefined), z.object({
+    keyFile: z.string().required(),
+    attemptsPerWindow: z.natural().min(1).default(10),
+    windowMs: z.natural().min(1000).max(3_600_000).default(60_000),
+    maxAddresses: z.natural().min(1).max(100000).default(1024),
+    timeoutMs: z.natural().min(1000).max(60_000).default(10_000),
+  })]),
   recovery: ConnectionRecoveryConfigSchema.default({}),
   trustedHosts: z.array(String).default([]),
   cookieMaxAgeDays: z.natural().min(1).default(30),
@@ -133,10 +144,12 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
   // silently authorizing its hostname prefix at request time.
   for (const entry of trustedHosts) assertTrustedAuthority(entry)
   assertImageBodyCapacity(ctx, maxRequestBodyBytes)
+  const browserAuth = await BrowserAuth.create(ctx.root, ctx.credentials, cookieMaxAgeDays, config?.keyLogin)
+  ctx.effect(() => () => browserAuth.close())
   const connection = new HostConnectionService(
     ctx,
     trustedHosts,
-    await BrowserAuth.create(ctx.root, ctx.credentials, cookieMaxAgeDays),
+    browserAuth,
   )
   ctx.inject(['webServer'], (webCtx) => {
     assertImageBodyCapacity(webCtx, maxRequestBodyBytes)
@@ -162,6 +175,18 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
       kind: 'exact', path: CONNECT_PATH,
       handler: (req, res) => { connection.authorizeConnect(req, res) },
     }), 'client-connection: /connect route')
+    if (browserAuth.keyLoginEnabled) webCtx.effect(() => webCtx.webServer.register({
+      kind: 'exact', path: LOGIN_PATH,
+      handler: async (req, res) => {
+        const server = webCtx.webServer
+        if (!isTrustedApiRequest(req, trustedHosts, server.host, server.protocol)) {
+          req.resume(); res.writeHead(403); res.end('forbidden'); return
+        }
+        await browserAuth.authorizeLogin(req, res, server.protocol === 'https:', (error) => {
+          webCtx.logger.error('Web key login failed; check the configured private key file and Host storage.', error)
+        })
+      },
+    }), 'client-connection: key login route')
   })
   ctx.inject(['attachments'], (attachmentCtx) => {
     assertImageBodyCapacity(attachmentCtx, maxRequestBodyBytes)

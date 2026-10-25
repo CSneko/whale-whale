@@ -1,0 +1,11 @@
+# Workspace browser testing uses launch-token authentication on loopback only.
+- id: webserver
+  config:
+    host: '127.0.0.1'
+    allowWildcardHost: false
+    port: !!js ctx.webStartup.port ?? 4004
+    tls: !!js ctx.webStartup.tls
+
+- id: connection
+  config:
+    trustedHosts: []

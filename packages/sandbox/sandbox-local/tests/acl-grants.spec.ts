@@ -17,6 +17,7 @@ import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 /** Cross-file state shared with the vi.mock factory (hoisting contract). */
 const mockState = vi.hoisted(() => ({
   grants: [] as Array<{ writeSid: string; added: Array<{ path: string; standing: boolean }>; disposed: boolean }>,
+  sidInputs: [] as string[],
   addFailure: undefined as Error | undefined,
   /** Restrict an add failure to standing (workspace) or revocable (temp). */
   addFailureStanding: undefined as boolean | undefined,
@@ -59,7 +60,7 @@ vi.mock('@deepseek-ai/dsh-sandbox-windows-acl', () => {
         throw new Error(`Windows ACL temp root must be outside the workspace: workspace=${workspaceRoot}; temp=${tempRoot}`)
       }
     },
-    workspaceWriteSid: () => 'S-1-4-42-42',
+    workspaceWriteSid: (path: string) => { mockState.sidInputs.push(path); return 'S-1-4-42-42' },
     tempWriteSid: (path: string) => `TEMP:${path}`,
   }
 })
@@ -88,6 +89,7 @@ describe('windows-acl write grants (LocalSandboxProvider)', () => {
 
   beforeEach(() => {
     mockState.grants = []
+    mockState.sidInputs = []
     mockState.addFailure = undefined
     mockState.addFailureStanding = undefined
     mockState.createTempFailure = undefined
@@ -113,6 +115,21 @@ describe('windows-acl write grants (LocalSandboxProvider)', () => {
         mode: 'workspace-write', workspaceRoot: ws, sessionId: SessionId('cancelled'),
       }, AbortSignal.abort(reason))).rejects.toBe(reason)
       expect(mockState.grants).toEqual([])
+    } finally { await fiber.dispose(); cleanup() }
+  })
+
+  it('keys additional Windows write grants by the complete root set instead of the ordinary workspace capability', async () => {
+    const { sandbox, fiber } = await setup()
+    try {
+      const ws = workspaceRoot(), personal = workspaceRoot()
+      scratch.push(ws, personal)
+      const policy: SandboxPolicy = { mode: 'workspace-write', workspaceRoot: ws, additionalWritableRoots: [personal], sessionId: SessionId('with-personal') }
+      await sandbox.confine(['true'], policy)
+      expect(mockState.sidInputs).toContain(JSON.stringify([ws, personal]))
+      expect(mockState.grants[0]?.added).toEqual([{ path: ws, standing: true }, { path: personal, standing: true }])
+      await sandbox.confine(['true'], { mode: 'workspace-write', workspaceRoot: ws, sessionId: SessionId('without-personal') })
+      expect(mockState.sidInputs.at(-1)).toBe(ws)
+      expect(mockState.grants.filter(grant => grant.added.some(item => item.standing))).toHaveLength(2)
     } finally { await fiber.dispose(); cleanup() }
   })
 

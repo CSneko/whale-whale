@@ -7,7 +7,7 @@ export class GenesisError extends Error {
    * @param options - Contained implementation failure, never model-visible.
    */
   constructor(
-    readonly code: 'closed' | 'storage' | 'invalid-source' | 'capacity' | 'locked' | 'invalid-state' | 'memory-provider',
+    readonly code: 'configuration-conflict' | 'closed' | 'storage' | 'invalid-source' | 'capacity' | 'locked' | 'invalid-state' | 'memory-provider',
     message: string,
     options?: ErrorOptions,
   ) {

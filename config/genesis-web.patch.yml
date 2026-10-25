@@ -1,0 +1,16 @@
+# Source-workspace Web defaults. Explicit dsh web options retain precedence.
+- id: webserver
+  config:
+    host: !!js ctx.webStartup.host ?? '0.0.0.0'
+    allowWildcardHost: true
+    port: !!js ctx.webStartup.port ?? 4004
+    tls: !!js ctx.webStartup.tls
+    compression: gzip
+    compressionLevel: 1
+    compressionThresholdBytes: 1024
+
+- id: connection
+  config:
+    trustedHosts: !!js ctx.webStartup.trustedHosts
+    keyLogin:
+      keyFile: !!js dshHomePath('web-login.key')

@@ -1,0 +1,31 @@
+# Bilingual-pair consistency record for emotion.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/genesis/emotion.md
+/genesis-emotion:
+  en: 05261ccd6afce4ac
+  zh: 34edd7d5bfe600fa
+/genesis-emotion/summary:
+  en: 3d462d390526260b
+  zh: 078e8cf5e86799b9
+/genesis-emotion/enable:
+  en: 388f560305122d69
+  zh: 626aee5c739d760c
+/genesis-emotion/mood-and-immediate-emotion:
+  en: f857b0cacef29fc0
+  zh: 2caf1d26404b7212
+/genesis-emotion/psychological-needs:
+  en: cb373238ea4cccda
+  zh: 6f71c1fc09e307fb
+/genesis-emotion/event-appraisal-and-behavior:
+  en: 1f63eabb85f32e41
+  zh: 7a6d7430129b7004
+/genesis-emotion/operator-relationship-and-management:
+  en: 3ec3fa116e62d167
+  zh: af68027700f9386a
+/genesis-emotion/persistence-and-failure:
+  en: 9decc3817b77c52d
+  zh: be4ff929b658eb31
+/genesis-emotion/dev-note:
+  en: b75c8458928b72b9
+  zh: 003ba4e17b4b5269

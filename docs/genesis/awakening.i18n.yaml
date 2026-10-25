@@ -3,17 +3,20 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/genesis/awakening.md
 /genesis-first-awakening:
-  en: e9546a7204d615c2
-  zh: 57aacb6e13468159
+  en: e7a5846b0a03687a
+  zh: 59bd715990f7d50d
 /genesis-first-awakening/configure-and-start:
-  en: 1360b7af369c0b35
-  zh: c6d36cbe89057845
+  en: 6df022b382c93a5d
+  zh: 21f1865d7736b209
 /genesis-first-awakening/meet-her:
-  en: 00e63d77a424f95f
-  zh: e98b3e9cb9fa7c18
+  en: 959fdccde1cbae2d
+  zh: b51c071a8e1f5f92
 /genesis-first-awakening/teach-a-tool:
-  en: a8000d4ff40f96b5
-  zh: 9dd3427e0c9c6c22
+  en: 70dda9378f9aee08
+  zh: 077823025f63d994
+/genesis-first-awakening/personal-directory:
+  en: e04ccd08ff682a6b
+  zh: 512b61fb781cb968
 /genesis-first-awakening/context-and-recovery:
-  en: d27d43a2735ff508
-  zh: 48ff709a1105ec86
+  en: f72eff9647fc7692
+  zh: 20bb4719b2929fca

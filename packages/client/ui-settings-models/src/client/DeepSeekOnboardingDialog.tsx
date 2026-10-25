@@ -5,6 +5,8 @@
  * official DeepSeek route. The step reuses that page's credential editor in
  * the onboarding plugin's shared modal, so the key is entered once.
  */
+import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { TrackProductEvent } from '@deepseek-ai/dsh-client-product-analytics/client'
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
@@ -26,9 +28,12 @@ export interface DeepSeekOnboardingInjected {
   track?: TrackProductEvent
   /** Whether first-run setup should show automatically. Explicit requests remain available. */
   automatic: boolean
+  /** Persist the user decision independently of current model credentials. */
+  dismissOnboarding(this: void): Promise<boolean>
   hooks: {
     /** Shared Models-page join state, bound by the slot renderer. */
     models: SnapshotStore<ModelsSettingsState>
+    onboardingPreference: ConfigForm<Record<string, unknown>>
   }
   /** Shared Models-page join controller. */
   controller: ModelsSettingsStore
@@ -57,6 +62,10 @@ function assertNever(_value: never): never {
  */
 export function DeepSeekOnboardingDialog(props: DeepSeekOnboardingDialogProps): ReactNode {
   const { complete, controller, useModels, operations, schema, t, renderSlot, automatic, explicit = false } = props
+  const preference = props.useOnboardingPreference(value => value)
+  const dismissed = preference.value?.credentialOnboardingDismissed === true
+  const [savingDismissal, setSavingDismissal] = useState(false)
+  const [dismissalFailed, setDismissalFailed] = useState(false)
   const [apiKey, setApiKey] = useState(explicit)
   const state = useModels(snapshot => snapshot)
   const readiness = onboardingReadiness(state)
@@ -68,13 +77,14 @@ export function DeepSeekOnboardingDialog(props: DeepSeekOnboardingDialogProps): 
   useEffect(() => {
     if (
       (!automatic && !explicit)
+      || (!explicit && dismissed)
       || readiness.kind === 'adapter-absent'
       || (!explicit && readiness.kind === 'provider-ready')
       || readiness.kind === 'unavailable'
     ) complete()
-  }, [complete, readiness.kind, explicit, automatic])
+  }, [complete, readiness.kind, explicit, automatic, dismissed])
 
-  if (!automatic && !explicit) return null
+  if ((!automatic || dismissed || preference.status === 'loading') && !explicit) return null
 
   switch (readiness.kind) {
     case 'loading':
@@ -131,6 +141,12 @@ export function DeepSeekOnboardingDialog(props: DeepSeekOnboardingDialogProps): 
           onClose={finishCredential}
         />
       </div>
+      <Button variant="outline" disabled={savingDismissal || !preference.writable} onClick={() => {
+        setSavingDismissal(true); setDismissalFailed(false)
+        void props.dismissOnboarding().then((saved) => { if (saved) complete(); else setDismissalFailed(true) })
+          .catch(() => { setDismissalFailed(true) }).finally(() => { setSavingDismissal(false) })
+      }}>{t('onboardingDontShow')}</Button>
+      {dismissalFailed ? <p role="alert">{t('onboardingDismissFailed')}</p> : null}
     </OnboardingModal>
   )
   return apiKey ? editor : renderSlot('settings.models.sign-in', { complete, useApiKey: () => { setApiKey(true) } }, { fallback: editor })

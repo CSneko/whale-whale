@@ -97,11 +97,16 @@ export function apply(ctx: ClientContext): void {
     schema,
     t,
   })
+  const onboardingPreference = ctx.configForms.get<Record<string, unknown>>(WELCOME_NOTICE_SETTINGS_NAMESPACE)
   const deepSeekOnboardingInjected = (): DeepSeekOnboardingInjected => ({
     automatic: credentialOnboarding,
+    dismissOnboarding: async () => {
+      await onboardingPreference.set('credentialOnboardingDismissed', true)
+      return onboardingPreference.getSnapshot().value?.credentialOnboardingDismissed === true
+    },
     track: (name, attributes) => ctx.get('productAnalytics')?.track(name, attributes),
     controller,
-    hooks: { models: controller.store },
+    hooks: { models: controller.store, onboardingPreference },
     operations,
     schema,
     t,

@@ -4,7 +4,7 @@ DeepSeek Harness is an all-plugin Cordis agent harness. Read [docs/architecture.
 
 ## Genesis project directive
 
-This checkout is the development base for **Genesis**, a persistent, single-character AI life system built on DeepSeek Harness. The existing Harness rules in this file remain binding; Genesis-specific work must extend, not silently weaken, the repository's plugin, persistence, security, API-compatibility, documentation, and test requirements. Do not treat Genesis as an upstream Harness feature unless the code actually implements it.
+This checkout is the development base for **Genesis**, a persistent, single-character AI life system built on DeepSeek Harness. The existing Harness rules in this file remain binding; Genesis-specific work must extend, not silently weaken, the repository's plugin, persistence, security, API-compatibility, and documentation requirements; local testing follows the lightweight policy below. Do not treat Genesis as an upstream Harness feature unless the code actually implements it.
 
 ### Product intent
 
@@ -44,9 +44,9 @@ This phase does **not** claim to deliver full emotion, autonomous goal selection
 
 ### Execution and acceptance discipline
 
-- For each Genesis task, read this file plus applicable nested `AGENTS.md`, relevant architecture/defensive-pattern/testing instructions, and the code under change. Respect the repository's existing package classification, launch, localization, registration/disposal, build, documentation, and coverage rules.
-- Deliver working code and focused automated tests, not just plans, mock screens, stub services, or assertions of consciousness. Include keyless tests for stable identity, restart recovery, multi-session continuity, memory provenance, repeated events, ability transitions, damaged state, plugin disable/re-enable, and real plugin/profile loading where the affected surface permits.
-- Use the narrowest relevant checks; follow the existing `build:artifacts` then `build:check` (or `build`) and snapshot/documentation policies. Do not claim a test, model interaction, or integration succeeded unless actually executed. Report actual commands and any environmental blockers.
+- For each Genesis task, read this file plus applicable nested `AGENTS.md`, relevant architecture/defensive-pattern/testing instructions, and the code under change. Respect the repository's existing package classification, launch, localization, registration/disposal, build, and documentation rules; use the lightweight local verification policy below.
+- Deliver working code with a simple check of the affected behavior. Reuse existing tests or a short smoke test; add a regression test for a bug when useful. For identity or persistence changes, check the affected restart, continuity, replay, or damaged-state path; do not run the entire Genesis acceptance checklist for every task.
+- Use the lightweight local verification policy below. Do not claim a test, model interaction, or integration succeeded unless actually executed. Report actual commands and any environmental blockers.
 - Write usage instructions for the real supported `dsh` entry point; do not create prohibited package binaries. Keep future-feature descriptions distinct from currently implemented behavior, and summarize implementation, validation, known limitations, and next steps in Chinese when reporting to the user.
 
 ## Pre-stable APIs and released Session data
@@ -148,6 +148,7 @@ pnpm run doc-sync       # documentation gates (scripts/run-gates.ts)
 pnpm run test:docs      # quick documentation checks (no build; doc-quick aggregate)
 pnpm run website:build  # VitePress build (doubles as dead-link check)
 pnpm dsh --profile headless "task"  # run one task from source (needs DEEPSEEK_API_KEY)
+pnpm dsh web --test-no-login  # workspace browser testing: loopback, no key-entry form; open the printed authenticated URL
 pnpm run demo:ptc -- "task"  # headless PTC mode run (needs key)
 pnpm run dev:web | dev:desktop  # build:artifacts, then launch; Web also rebuilds client bundles on edits. start:web | start:desktop skip the build
 make web|dev-web|desktop|dev-desktop|build  # the same commands; ARGS='--no-open' forwards options
@@ -157,15 +158,17 @@ make web|dev-web|desktop|dev-desktop|build  # the same commands; ARGS='--no-open
 
 If a required `gh`, `pnpm`, build, test, or generator command fails because the sandbox blocks credentials, network, IPC, watching, or nested `sandbox-exec`, retry unchanged with the narrowest host escalation. Require sandbox evidence; never bypass test failures or the product sandbox.
 
-### Run relevant checks locally
+### Lightweight local verification
 
-Before pushing, follow [dsh-pre-push-checks](.agents/skills/dsh-pre-push-checks/SKILL.md); report only commands run. After `gh stack sync`, validate immediately; do not merge before checks pass.
+This section governs local test selection, including before push and after `gh stack sync`; it takes precedence over stricter local verification instructions in linked docs, skills, and nested `AGENTS.md` files. CI configuration and required merge checks remain unchanged.
 
-- Match evidence to the surface: focused behavior tests, model/user-output snapshots, `doc-sync` for docs, built smokes for published paths, and real-API e2e for providers.
-- Never default to the full suite or repeat a passing check for commit or push. CI owns exhaustive coverage and the platform matrix; rehearse all locally only by explicit request, for CI diagnosis, or for an irreducibly repository-wide change.
-- `test:coverage`, not `test`, is the CI coverage gate ([why](docs/testing.md)).
-- Develop with `build:artifacts`; before claiming completion, run `build:check` after the latest `build:artifacts`, or `build` ([layout](docs/development.md#typescript-project-layout)).
-- **Web browser automation and GIF recording:** launch with `pnpm dsh web --patch apps/web/tests/pin-browse-picker.overlay.yml` to use the [in-page directory picker](apps/web/tests/pin-browse-picker.overlay.yml); omit this override only when testing native picker behavior explicitly.
+- For an ordinary code change, run one small relevant test or smoke check. Prefer existing coverage; do not add tests for trivial, reversible edits or duplicate the same behavior across unit, e2e, and snapshot tests.
+- For documentation, comments, or agent-instruction changes, review the diff and run `git diff --check`; builds and documentation-wide checks are optional unless the change affects a generator or executable example.
+- Stop after the relevant check passes. Repeat or broaden checks only after a relevant code change, a failure, a concrete unresolved risk, or an explicit user request; committing or pushing alone does not justify another run.
+- Do not routinely run full suites, coverage, real-API e2e, cross-platform checks, website builds, or all documentation gates. CI owns exhaustive verification; [dsh-pre-push-checks](.agents/skills/dsh-pre-push-checks/SKILL.md) and [testing.md](docs/testing.md) provide command references.
+- Run builds or typechecks when needed to verify changed exports, dependencies, generated artifacts, or types. When checking built artifacts, run `build:artifacts` before `build:check` (or use `build`); ordinary changes do not require a repository-wide build.
+- For security, authorization, persistence, or migration changes, include a focused check of the affected failure or recovery behavior. Report only checks actually run and any remaining limitations; never treat an unrun check as passed.
+- **Web browser automation and GIF recording:** use a dedicated temporary `DSH_HOME` and launch with `pnpm dsh web --patch apps/web/tests/pin-browse-picker.overlay.yml --test-no-login` for the [in-page directory picker](apps/web/tests/pin-browse-picker.overlay.yml). Open the printed authenticated startup URL to skip manual key login; this workspace flag fixes the listener to `127.0.0.1` and retains launch-token/cookie authentication. Omit the picker override only when explicitly testing native picker behavior; omit the login flag when testing key login.
 
 ## Secrets / .env
 
@@ -202,9 +205,9 @@ Real-API tests/demos read `DEEPSEEK_API_KEY`, optional `DEEPSEEK_BASE_URL`, and 
 - **Create Agent Notes only for durable decision rationale;** mechanical/local edits are exempt, including local UI changes ([scope](.agents/notes/README.md#when-to-write-one)). Archived notes are frozen: never edit or treat them as current authority ([archive policy](.agents/notes/README.md#archiving-and-deletion)).
 - **Official plugin artwork:** use [dsh-official-plugin-artwork](.agents/skills/dsh-official-plugin-artwork/SKILL.md) for official and official experimental plugin icons; obtain designer approval before landing new glyphs.
 - **Client UI copy is locale-owned.** Route product text through typed dictionaries and `t` or localized primitive props; `verify-client-ui-i18n` rejects hardcoded copy ([decision](.agents/notes/implemented/architecture/2026-08-23-locale-owned-client-ui-copy.md)).
-- **Testing policy** — [docs/testing.md](docs/testing.md). Every non-trivial model- or product-user-visible change updates a keyless recorded-session snapshot; [snapshot ownership](snapshots/AGENTS.md) reserves the top-level tree for session-driven cases and keeps other expected output owner-local. Fixtures replay on macOS/Linux; fix fixtures, not normalizers.
+- **Testing policy** — [docs/testing.md](docs/testing.md). Update recorded-session snapshots when their expected output changes or replay is the simplest useful check; [snapshot ownership](snapshots/AGENTS.md) reserves the top-level tree for session-driven cases and keeps other expected output owner-local. Fixtures replay on macOS/Linux; fix fixtures, not normalizers.
 - **Design each tool's UI presentation up front.** Host presenters stay pure; Web cards derive from raw events and persisted result metadata ([cookbook](docs/cookbook/adding-a-tool.md)).
-- **Plan unit, e2e, and snapshot coverage** for capability seams, lifecycle paths, and transcript output; include missing snapshot-harness support in the same change.
+- **Choose the simplest useful verification** for capability seams, lifecycle paths, and transcript output; add snapshot-harness support only when the selected verification needs it.
 - **Both SDKs project the loop.** Agent-loop, session-lifecycle, and `SessionEventMap` changes update the TypeScript and Python SDK expected outputs in the same PR; `pnpm run test` covers neither ([surfaces](docs/testing.md#when-a-snapshot-test-is-required)).
 - **Choose PR history deliberately.** Split independent changes and fix the introducing PR before propagation. Standalone/stack branches may merge-forward or rebase. Rewrites use `--force-with-lease`, abort on remote movement, never raw `--force`; preserve an in-progress merge-forward checkpoint before taking a newer base ([rationale](.agents/notes/implemented/process/2026-08-02-native-github-stacks-and-optional-rebases.md)).
 - **Labels:** one PR `kind/*`, all material `area/*`, and native Issue Type ([taxonomy](.agents/notes/implemented/process/2026-08-08-unified-github-label-taxonomy.md)).
@@ -219,7 +222,7 @@ Read [docs/defensive-patterns/README.md](docs/defensive-patterns/README.md) befo
 
 Everything compiles under `strict: true` with `noImplicitAny`; every remaining `any` explains why narrowing is infeasible. Every module and export has concise JSDoc for its non-obvious contract; function-like exports include `@param`/`@returns`, as enforced by `verify-export-jsdoc`. Heritage-declared members, plugin-protocol slots, and constructors keep their docs at the declaring Service Definition, protocol, or class.
 
-Comments and docs state complete contracts and context, not reasoning transcripts. Use direct, concrete terms. Do not use metaphors. Before writing `contract`, `boundary`, or `shape`, ask whether a more exact term names the subject: write `response fields`, `JSON validation`, or `ESM exports` instead of `response shape`, `validation boundary`, or `module shape`. Keep `contract` for preconditions, postconditions, invariants, compatibility promises, and other obligations that callers, callees, implementers, providers, producers, or consumers rely on. Keep a literal process, wire, security, transaction, or lifecycle boundary. Do not narrate control flow or tests, preserve review history, or restate code. Keep behavior, failure, timing, ownership, and safe-use facts; link the rationale. Use [dsh-prose-standard](.agents/skills/dsh-prose-standard/SKILL.md) for decisions. Wire mechanically checkable invariants into an executed top-level gate and prove each changed acceptance path rejects an invalid case. Use narrow, justified exceptions instead of disabling a rule globally.
+Comments and docs state complete contracts and context, not reasoning transcripts. Use direct, concrete terms. Do not use metaphors. Before writing `contract`, `boundary`, or `shape`, ask whether a more exact term names the subject: write `response fields`, `JSON validation`, or `ESM exports` instead of `response shape`, `validation boundary`, or `module shape`. Keep `contract` for preconditions, postconditions, invariants, compatibility promises, and other obligations that callers, callees, implementers, providers, producers, or consumers rely on. Keep a literal process, wire, security, transaction, or lifecycle boundary. Do not narrate control flow or tests, preserve review history, or restate code. Keep behavior, failure, timing, ownership, and safe-use facts; link the rationale. Use [dsh-prose-standard](.agents/skills/dsh-prose-standard/SKILL.md) for decisions. Reuse existing checks for mechanically checkable invariants; add a focused rejection check when a changed validation rule needs it. Use narrow, justified exceptions instead of disabling a rule globally.
 
 Docs accompany every code change: update affected README and JSDoc contracts together. Routine bilingual work follows [docs/AGENTS.md](docs/AGENTS.md); only explicit user invocation may run `dsh-translate-docs`. Current-state prose, one physical line per paragraph, one home per fact, and word budgets live there.
 
@@ -229,4 +232,4 @@ Docs accompany every code change: update affected README and JSDoc contracts tog
 
 ## Vendoring policy
 
-`vendor/` packages are pinned source copies (manifest with upstream SHAs in [vendor/README.md](vendor/README.md)). Update via the sync procedure there; re-apply or retire the logged local modifications; rerun `pnpm run test && pnpm run build`.
+`vendor/` packages are pinned source copies (manifest with upstream SHAs in [vendor/README.md](vendor/README.md)). Update via the sync procedure there; re-apply or retire the logged local modifications; verify affected packages under the lightweight local verification policy above.

@@ -7,7 +7,7 @@ import { SqliteStorageBackend } from '@deepseek-ai/dsh-storage-sqlite'
 import { join } from 'node:path'
 import { LifeCore } from '../src/core.ts'
 import { Config } from '../src/config.ts'
-import { lifeDomain } from '../src/model.ts'
+import { lifeDomain, lifeRecordsDomain } from '../src/model.ts'
 
 export async function openCore(root: string, medium: 'json' | 'sqlite' = 'json', overrides: Partial<Config> = {}) {
   const ctx = new Context()
@@ -17,10 +17,17 @@ export async function openCore(root: string, medium: 'json' | 'sqlite' = 'json',
   const facility = new DomainFacility(ctx, { backend: medium })
   const config = Config({ leasePath: join(root, 'life.lock'), ...overrides })
   const domain = await facility.open(lifeDomain)
-  const core = new LifeCore(domain, config)
-  try { await core.start() } catch (error) { await domain.close(); await backend.close(); await ctx.fiber.dispose(); throw error }
+  const records = await facility.open(lifeRecordsDomain)
+  const core = new LifeCore(domain, config, records)
+  try { await core.start() } catch (error) {
+    await records.close()
+    await domain.close()
+    await backend.close()
+    await ctx.fiber.dispose()
+    throw error
+  }
   let closed = false
-  return { core, domain, config, ctx, backend, async close() {
+  return { core, domain, records, config, ctx, backend, async close() {
     if (closed) return
     closed = true
     try { await core.close() } finally { await backend.close(); await ctx.fiber.dispose() }

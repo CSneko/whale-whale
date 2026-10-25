@@ -62,6 +62,14 @@ afterEach(() => {
 })
 
 describe('shared config schema catalog', () => {
+  it.each([false, true])('checks fields inside a whole-object transform (invalid=%s)', (invalid) => {
+    const fields = invalid ? sharedSchema.replace('headless: Schema.boolean()', 'headless: Schema.boolean(), hidden: Schema.string()') : sharedSchema
+    const { root } = fixture(fields.replace('export const Shared = Schema.union', 'export const Shared = Schema.transform(Fields, value => value)\nconst Fields = Schema.union'))
+    if (invalid) expect(() => collectConfigCatalog(root)).toThrow("schema validates key 'hidden'")
+    else expect(new Set(collectConfigCatalog(root).find(entry => entry.pkg === '@test/provider')?.schemaKeys))
+      .toEqual(new Set(['mode', 'headless', 'endpoint']))
+  })
+
   it('collects every branch through a renamed named import from a public source subpath', () => {
     const { root } = fixture()
     const provider = collectConfigCatalog(root).find(entry => entry.pkg === '@test/provider')

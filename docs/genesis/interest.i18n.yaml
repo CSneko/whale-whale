@@ -1,0 +1,25 @@
+# Bilingual-pair consistency record for interest.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/genesis/interest.md
+/genesis-interests:
+  en: e7af90902aa4b301
+  zh: b3a1dfd487d815f2
+/genesis-interests/summary:
+  en: 1468ecf1ed12653f
+  zh: 2a3231cc7de8bcb4
+/genesis-interests/enable:
+  en: 2e71a0c94292d98c
+  zh: 770467e2dbda10f9
+/genesis-interests/development-from-experience:
+  en: 3f3b710f7663cd42
+  zh: e7bc8e5adfdf8c9e
+/genesis-interests/use-in-conversation:
+  en: 78c41c04b117001f
+  zh: 0e8621091bddfe97
+/genesis-interests/limitations:
+  en: 55861ff90fa9fd14
+  zh: 8235e80867ed0f31
+/genesis-interests/dev-note:
+  en: b75c8458928b72b9
+  zh: 45e76642489dcc3c

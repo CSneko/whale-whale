@@ -1,0 +1,30 @@
+.readings { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 16px; }
+.card { min-width: 0; padding: 16px; border: 1px solid var(--dsw-alias-line-tertiary); border-radius: 8px; }
+.card h4 { margin-top: 0; }
+.meters { display: grid; gap: 12px; margin: 16px 0 0; }
+.meters > div { display: grid; grid-template-columns: minmax(70px, 1fr) minmax(0, 2fr); align-items: center; gap: 12px; }
+.meters dd { display: flex; align-items: center; gap: 12px; margin: 0; min-width: 0; }
+.meters meter { flex: 1; min-width: 0; width: 100%; accent-color: var(--dsw-alias-label-primary); }
+.meters span { min-width: 4ch; text-align: right; font-variant-numeric: tabular-nums; }
+.fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 12px; }
+.field { display: grid; gap: 4px; min-width: 0; }
+.form { display: grid; gap: 16px; }
+.form fieldset { min-width: 0; }
+.halfLives { display: grid; gap: 16px; }
+.halfLifeRow { display: grid; grid-template-columns: minmax(80px, 1fr) minmax(0, 1fr) minmax(0, 1fr); align-items: end; gap: 12px; }
+@media (max-width: 480px) {
+  .halfLifeRow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .halfLifeRow > span { grid-column: 1 / -1; }
+}
+
+.dialog { width: min(640px, 100%); max-height: 100%; }
+.dialogContent { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+
+.meters .meterHint { display: block; grid-column: 1 / -1; margin: 0; overflow-wrap: anywhere; }
+.content { overflow-wrap: anywhere; }
+
+@media (max-width: 480px) {
+  .card { padding: 8px; }
+  .meters > div { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .meters dd { gap: 4px; }
+}

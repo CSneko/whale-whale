@@ -1,18 +1,45 @@
 /** Atomic life state, sourced memory retrieval and observed system growth. @module */
+import { applyDeliberation, type DeliberationCommit } from './agency.ts'
+import type { DecisionId, LifeDecision, LifeGoalId } from './agency-state.ts'
 import { randomUUID, createHash } from 'node:crypto'
+import { z } from 'zod'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import type { Domain } from '@deepseek-ai/dsh-storage-domain'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { ToolSchema } from '@deepseek-ai/dsh-llm'
+import type { MemoryDraft, ReviewFailure } from './status-types.ts'
 import type { Config } from './config.ts'
+import { operatorIdentitySchema, type OperatorIdentity } from './model.ts'
+import type { MemoryRelabel } from './participants.ts'
 import { GenesisError } from './error.ts'
+import { splitState, joinState } from './storage-state.ts'
+import type { LifeManifest } from './storage-layout.ts'
+import type { InterestDialogue } from './interest-projection.ts'
+import type { InterestProposal } from './interest.ts'
+import { emotionAt, initialEmotion, resolveEmotion, type EmotionUpdate, type EmotionSettings, type EmotionAdjustment, type StoredEmotionState } from './emotion-state.ts'
+import { type RelationshipAdjustment, type RelationshipId } from './relationship-state.ts'
+import type { EmotionDialogue } from './emotion-projection.ts'
+import { applyAppraisal } from './emotion-appraisal.ts'
 import { backupPath, hasBackup, writeBackup } from './backup.ts'
-import { lifeDomain, memoryInputSchema } from './model.ts'
-import type { CapabilityId, GrowthId, LifeEvent, LifeEventId, LifeId, LifeMemory, LifeState, MemoryId, MemoryInput, MemoryEmbedding } from './model.ts'
+import { applyConsolidation, queueConsolidation, type ConsolidationCommit, type ReviewEvidence } from './consolidation-state.ts'
+import { retainMemoryHistory } from './memory-history.ts'
+import { organizationSources, organizationReplay, appendOrganizedMemory, type OrganizedMemory } from './organization.ts'
+import type { MemoryOrganizationRequest } from './status-types.ts'
+import { memoryTimeText } from './memory-time.ts'
+import { lifeDomain, memoryInputSchema, experienceSchema, stateSchema, lifeRecordsDomain } from './model.ts'
+import type { CapabilityId, GrowthId, LifeEvent, LifeEventId, LifeId, LifeMemory, LifeState, MemoryId, MemoryInput, MemoryEmbedding, MemoryExperience, InterestId, LifeInterest } from './model.ts'
 
 /** One independently generated, validated change committed with its review marker. */
 export type MemoryChange = { action: 'delete'; id: MemoryId }
   | { action: 'upsert'; id?: MemoryId; input: MemoryInput; embedding: MemoryEmbedding }
+
+/** Writer-selected summary with Host-derived conversation, time and source references. */
+export interface ExperienceChange {
+  id?: MemoryId
+  input: MemoryInput
+  details: MemoryExperience
+  embedding: MemoryEmbedding
+}
 
 /** Bounded event query, ordered by recorded time. */
 export interface EventQuery {
@@ -53,6 +80,11 @@ function fact(state: LifeState, type: string, dedupKey: string, payload: LifeEve
   state.events.push(event)
   return event
 }
+function emotionRecord(state: StoredEmotionState) {
+  const { controls, ...anchor } = state
+  const record = { ...anchor, ...(controls === undefined ? {} : { controls }) }
+  return record
+}
 function grow(state: LifeState, event: LifeEvent, title: string, description: string): void {
   fact(state, 'growth.recorded', `growth:${event.id}`, { relatedEventId: event.id, title })
   state.growth.push({ id: brandString<GrowthId>(randomUUID()), lifeId: state.identity.id,
@@ -60,23 +92,27 @@ function grow(state: LifeState, event: LifeEvent, title: string, description: st
 }
 
 /**
- * One life domain owner. Writes serialize and replace one snapshot, so facts and
- * state commit together. Storage failures poison this instance until reload;
+ * One life owner. Writes serialize components and replace one manifest, so facts
+ * and state commit together. Storage failures poison this instance until reload;
  * validation and capacity refusals leave it usable. Returned data is detached.
  */
 export class LifeCore {
+  private committed: LifeState | undefined
+  private backedUp: LifeManifest | undefined
   private chain: Promise<void> = Promise.resolve()
   private stopping = false
   private failure: GenesisError | undefined
   private closing: Promise<void> | undefined
   private initialized: Promise<void> | undefined
-  private learningState: { ready: boolean; tools: string[]; firstSessionId?: SessionId } | undefined
+  private learningState: { ready: boolean; tools: string[]; firstSessionId?: SessionId; firstConversationComplete: boolean } | undefined
 
   /**
    * @param domain - Exclusively leased validated domain; ownership transfers to this core.
    * @param config - Resolved storage and response limits.
+   * @param records - Immutable component domain; ownership transfers to this core.
    */
-  constructor(private readonly domain: Domain<typeof lifeDomain>, private readonly config: Config) {}
+  constructor(private readonly domain: Domain<typeof lifeDomain>, private readonly config: Config,
+    private readonly records: Domain<typeof lifeRecordsDomain>) {}
 
   /**
    * Initialize once or restore the same life; birth and initial memory commit atomically.
@@ -88,11 +124,20 @@ export class LifeCore {
   }
 
   private async initialize(): Promise<void> {
+    try { new Intl.DateTimeFormat('en', { timeZone: this.config.timeZone }) } catch (error) {
+      throw new GenesisError('invalid-state', 'Genesis timeZone must be a supported IANA calendar zone.', { cause: error })
+    }
     if (this.domain.table('states').size > 1
       || [...this.domain.table('states').keys()].some((key: string) => key !== 'life')) {
       throw new GenesisError('invalid-state', 'Genesis has unexpected state keys. Restore a verified backup before restarting.')
     }
-    const existing = this.domain.table('states').get('life')
+    const stored = this.domain.table('states').get('life')
+    const existing = stored === undefined ? undefined : 'format' in stored
+      ? await joinState(stored, (table, key) => this.records.table(table).get(key)) : stored
+    this.committed = existing
+    if (stored === undefined && Object.keys(lifeRecordsDomain.tables).some(table => this.records.table(table).size > 0)) {
+      throw new GenesisError('invalid-state', 'Genesis commit descriptor is absent but life records exist. Restore verified storage; a new life was not created.')
+    }
     if (existing !== undefined) this.publishLearning(existing)
     if (existing === undefined) {
       if (await hasBackup(backupPath(this.config.leasePath, this.config.backupPath))) {
@@ -106,17 +151,293 @@ export class LifeCore {
         events: [], memories: [], growth: [], sessions: {},
       }
       const born = fact(state, 'life.created', 'birth', {}, 'system', undefined, undefined, now)
-      grow(state, born, 'Foundation initialized', 'Persistent identity, life facts, sourced lexical memory and runtime tool observation are enabled.')
       const initialMemoryId = brandString<MemoryId>(randomUUID())
       if (this.config.awakening === undefined) {
         state.memories.push({ id: initialMemoryId, lifeId: state.identity.id, category: 'self',
-          content: 'Persistent identity and sourced long-term memory are enabled. Emotion, motivation and autonomous awakening are not implemented.',
+          content: this.config.emotion === undefined
+            ? 'Persistent identity and sourced long-term memory are enabled. Emotion, motivation and autonomous awakening are not implemented.'
+            : 'Persistent identity and sourced long-term memory are enabled. Emotion is simulated; motivation and autonomous awakening are not implemented.',
           importance: 1, confidence: 1, sourceEventIds: [born.id], createdAt: now, updatedAt: now })
         fact(state, 'memory.created', `initial-memory:${born.id}`, { memoryId: initialMemoryId })
       }
       await this.persist(state)
     }
-    await this.change((state) => { fact(state, 'life.started', `start:${randomUUID()}`, {}) })
+    await this.change((state) => {
+      fact(state, 'life.started', `start:${randomUUID()}`, {})
+      const config = this.config.emotion
+      if (config !== undefined) {
+        const now = new Date().toISOString()
+        if (state.emotion === undefined) {
+          state.emotion = initialEmotion(config, now)
+          fact(state, 'emotion.initialized', 'emotion:initialized', { state: emotionRecord(state.emotion) })
+          const legacy = state.memories.find(memory => memory.content === 'Persistent identity and sourced long-term memory are enabled. Emotion, motivation and autonomous awakening are not implemented.'
+            && memory.sourceEventIds.some(id => state.events.some(event => event.id === id && event.type === 'life.created')))
+          if (legacy !== undefined) {
+            const updatedAt = memoryTime(legacy)
+            state.memories[state.memories.indexOf(legacy)] = retainMemoryHistory(legacy, { ...legacy, updatedAt,
+              content: 'Persistent identity and sourced long-term memory are enabled. Emotion is simulated; motivation and autonomous awakening are not implemented.' })
+            fact(state, 'memory.updated', `emotion:self-description:${legacy.id}`, { memoryId: legacy.id })
+          }
+        } else if (state.emotion.controls === undefined && JSON.stringify([state.emotion.baseline, state.emotion.shortHalfLifeMs, state.emotion.moodHalfLifeMs, state.emotion.needsHalfLifeMs, state.emotion.interactionHalfLifeMs, state.emotion.sensitivity])
+          !== JSON.stringify([config.baseline, config.shortHalfLifeMs, config.moodHalfLifeMs, config.needsHalfLifeMs, config.interactionHalfLifeMs, config.sensitivity])) {
+          const previous = state.emotion
+          state.emotion = { ...emotionAt(previous, now), revision: previous.revision + 1,
+            sensitivity: config.sensitivity, baseline: { ...config.baseline }, shortHalfLifeMs: { ...config.shortHalfLifeMs }, moodHalfLifeMs: { ...config.moodHalfLifeMs }, needsHalfLifeMs: config.needsHalfLifeMs, interactionHalfLifeMs: config.interactionHalfLifeMs }
+          fact(state, 'emotion.configured', `emotion:configuration:${state.emotion.revision}`, { before: emotionRecord(previous), after: emotionRecord(state.emotion) })
+        }
+      }
+      if (this.config.deliberation !== undefined && state.agency === undefined) {
+        state.agency = { version: 1, revision: 0, motivations: [], goals: [], decisions: [] }
+        fact(state, 'agency.initialized', 'agency:initialized', { version: 1 })
+        for (const memory of state.memories.filter(item => item.category === 'self' && item.sourceEventIds.some(id =>
+          state.events.some(event => event.id === id && event.type === 'life.created'))
+          && item.content.includes('motivation and autonomous awakening are not implemented'))) {
+          const replacement = retainMemoryHistory(memory, { ...memory, updatedAt: memoryTime(memory),
+            content: 'Persistent identity, sourced memory and optional deliberation are enabled. Autonomous wake scheduling is unavailable; emotion and motivation are engineered state, not evidence of consciousness.' })
+          state.memories[state.memories.indexOf(memory)] = replacement
+          fact(state, 'memory.updated', `agency:self-description:${memory.id}`, { memoryId: memory.id })
+        }
+      }
+      if (this.config.interest !== undefined && state.interests === undefined) {
+        state.interests = []
+        fact(state, 'interest.initialized', 'interest:initialized', { interests: [] })
+      }
+    })
+  }
+
+  /**
+   * Record an actual application deliberation trigger without copying user text.
+   * @param sessionId - Audit Session receiving the trigger.
+   * @param key - Caller-owned stable replay key, scoped to this Session.
+   * @param kind - Request admission or externally delivered event.
+   * @param source - Required existing life event for an external trigger; absent for requests.
+   * @returns Original or newly committed trigger fact.
+   */
+  prepareDeliberation(sessionId: SessionId, key: string, kind: 'request' | 'event', source?: LifeEventId): Promise<LifeEvent> {
+    return this.change((state) => {
+      if (key.length === 0 || key.length > 200) throw new GenesisError('invalid-source', 'Deliberation key must contain 1–200 characters.')
+      if (kind === 'event' && (source === undefined || !state.events.some(event => event.id === source))) {
+        throw new GenesisError('invalid-source', 'External deliberation requires an existing life event.')
+      }
+      const previous = state.events.find(event => event.dedupKey === `deliberation-trigger:${sessionId}:${key}`)
+      if (previous !== undefined && (previous.payload['kind'] !== kind || previous.payload['sourceEventId'] !== (source ?? null))) {
+        throw new GenesisError('invalid-source', 'A deliberation replay key cannot refer to a different trigger.')
+      }
+      return fact(state, 'decision.triggered', `deliberation-trigger:${sessionId}:${key}`, { kind,
+        sourceEventId: source ?? null }, kind === 'request' ? 'user' : 'system', sessionId)
+    })
+  }
+
+  /**
+   * Publish a validated deliberation and all its state transitions atomically.
+   * @param commit - Captured evidence, revision and proposal from the independent writer.
+   * @returns Committed choice; replay returns the original choice without further changes.
+   */
+  commitDeliberation(commit: DeliberationCommit): Promise<LifeDecision> {
+    return this.change((state) => {
+      const config = this.config.deliberation
+      if (config === undefined) throw new GenesisError('invalid-state', 'Enable deliberation before making life decisions.')
+      const trigger = state.events.find(event => event.id === commit.sourceEventIds[0])
+      if (trigger?.type !== 'decision.triggered' || trigger.relatedSessionId !== commit.sessionId
+        || trigger.payload['kind'] !== commit.trigger || trigger.dedupKey !== `deliberation-trigger:${commit.key}`) throw new GenesisError('invalid-source', 'Decision trigger does not match its Session.')
+      return applyDeliberation(state, commit, config, (type, key, payload) => fact(state, type, key, payload, 'agent', commit.sessionId))
+    })
+  }
+
+  /**
+   * Reserve an autonomous follow-up once before enqueueing; a crash leaves an explicit uncertain admission.
+   * @param id - Pending externally triggered choice.
+   * @returns Whether this caller acquired dispatch; replay and settled choices return false.
+   */
+  reserveDecisionDispatch(id: DecisionId): Promise<boolean> {
+    return this.change((state) => {
+      const decision = state.agency?.decisions.find(item => item.id === id)
+      if (decision === undefined || decision.trigger !== 'event') throw new GenesisError('invalid-source', 'Autonomous decision is absent.')
+      const key = `decision-dispatch:${id}`
+      if (decision.outcome.status !== 'pending' || state.events.some(event => event.dedupKey === key)) return false
+      fact(state, 'decision.dispatched', key, { decisionId: id }, 'system', decision.sessionId)
+      return true
+    })
+  }
+
+  /**
+   * Check the committed decision synchronously at tool execution; poisoned storage refuses access.
+   * @param id - Choice admitted by this live Agent's integration.
+   * @returns Whether willingness permits task tools; execution authorization remains independent.
+   */
+  permitsDecision(id: DecisionId): boolean {
+    this.assertUsable()
+    const agency = this.state().agency
+    const decision = agency?.decisions.find(item => item.id === id)
+    return decision?.outcome.status === 'pending' && decision.candidates[decision.selected]?.disposition === 'accept'
+      && decision.goalIds.every(goalId => agency?.goals.some(goal => goal.id === goalId && goal.status === 'active'))
+  }
+
+  /**
+   * Attach observed Session result references and update failure history, without claiming goal completion.
+   * @param id - Committed decision whose execution has settled.
+   * @param outcome - Host-derived result, never model-authored text.
+   * @param sources - Actual observed life event IDs from this decision's Session.
+   * @returns After result publication; repeat settlements are no-ops.
+   */
+  settleDecision(id: DecisionId, outcome: LifeDecision['outcome']['status'], sources: LifeEventId[]): Promise<void> {
+    return this.change((state) => {
+      const agency = state.agency
+      const decision = agency?.decisions.find(item => item.id === id)
+      if (agency === undefined || decision === undefined) throw new GenesisError('invalid-source', 'Decision is absent. Refresh life state.')
+      if (decision.outcome.status !== 'pending') return
+      if (outcome === 'pending' || (outcome !== 'interrupted' && !sources.length)
+        || sources.some(id => !state.events.some(event => event.id === id && event.type === 'interaction.observed'
+          && event.relatedSessionId === decision.sessionId))) throw new GenesisError('invalid-source', 'Decision results require actual Session observations.')
+      if (outcome === 'succeeded' && !sources.some(id => state.events.some(event => event.id === id
+        && event.payload['kind'] === 'tool-result' && event.payload['success'] === true))) {
+        throw new GenesisError('invalid-source', 'Execution success requires a successful tool result.')
+      }
+      decision.outcome = { status: outcome, sourceEventIds: sources, recordedAt: new Date().toISOString() }
+      if (outcome === 'failed') for (const goal of agency.goals.filter(item => decision.goalIds.includes(item.id))) goal.failures++
+      agency.revision++
+      fact(state, 'decision.settled', `decision-result:${id}`, { decisionId: id, outcome: decision.outcome }, 'system', decision.sessionId)
+    })
+  }
+
+  /**
+   * Record an explicit operator pause, resume or abandonment without changing goal origin or completion.
+   * @param id - Stable goal identifier.
+   * @param status - Active, paused or abandoned; completion requires verified execution.
+   * @param revision - Displayed agency revision for optimistic concurrency.
+   * @param reason - Human explanation, validated at this application input.
+   * @returns After the history and current state commit; stale edits leave both unchanged.
+   */
+  setLifeGoalStatus(id: LifeGoalId, status: 'active' | 'paused' | 'abandoned', revision: number, reason: string): Promise<void> {
+    const input = z.strictObject({ id: z.uuid(), status: z.enum(['active', 'paused', 'abandoned']),
+      revision: z.number().int().nonnegative(), reason: z.string().trim().min(1).max(800) }).parse({ id, status, revision, reason })
+    return this.change((state) => {
+      const agency = state.agency
+      if (agency === undefined || agency.revision !== input.revision) {
+        throw new GenesisError('configuration-conflict', 'Life goals changed. Refresh and review the latest goal before saving.')
+      }
+      const goal = agency.goals.find(item => item.id === input.id)
+      if (goal === undefined || goal.status === 'completed' || goal.status === 'abandoned') {
+        throw new GenesisError('invalid-source', 'Only an unfinished life goal can be edited.')
+      }
+      if (goal.status === input.status) return
+      const previous = goal.history.at(-1)
+      if (previous === undefined) throw new GenesisError('invalid-state', 'Life goal history is unavailable.')
+      goal.status = input.status; goal.updatedAt = new Date().toISOString()
+      goal.history.push({ timestamp: goal.updatedAt, status: input.status, reason: input.reason,
+        nextAction: goal.nextAction, decisionId: previous.decisionId, actor: 'operator' })
+      agency.revision++
+      fact(state, 'goal.adjusted', `life-goal-operator:${randomUUID()}`, { goalId: goal.id, status: input.status,
+        reason: input.reason, revision: agency.revision }, 'user')
+    })
+  }
+
+  /**
+   * Confirm goal completion after independent application verification of a successful linked execution.
+   * @param id - Active life goal; ordinary chat and deliberation proposals cannot complete it.
+   * @param decisionId - Settled successful execution linked to this goal.
+   * @param evidence - Successful tool-result fact from that decision's observed outcome.
+   * @returns After completion and its immutable history commit; replay is idempotent.
+   */
+  completeLifeGoal(id: LifeGoalId, decisionId: DecisionId, evidence: LifeEventId): Promise<void> {
+    return this.change((state) => {
+      const agency = state.agency
+      const goal = agency?.goals.find(item => item.id === id)
+      const decision = agency?.decisions.find(item => item.id === decisionId)
+      if (agency === undefined || goal === undefined || decision === undefined || !decision.goalIds.includes(id)
+        || decision.outcome.status !== 'succeeded' || !decision.outcome.sourceEventIds.includes(evidence)
+        || !state.events.some(event => event.id === evidence && event.payload['kind'] === 'tool-result' && event.payload['success'] === true)) {
+        throw new GenesisError('invalid-source', 'Goal completion requires independently verified linked execution evidence.')
+      }
+      if (goal.status === 'completed') return
+      if (goal.status !== 'active') throw new GenesisError('invalid-source', 'Only an active life goal can complete.')
+      goal.status = 'completed'; goal.updatedAt = new Date().toISOString()
+      goal.history.push({ timestamp: goal.updatedAt, status: 'completed', nextAction: goal.nextAction,
+        reason: 'Application verified the linked execution result.', decisionId, actor: 'application' })
+      agency.revision++
+      const event = fact(state, 'goal.completed', `life-goal-complete:${id}`, { goalId: id, decisionId, sourceEventIds: [evidence] }, 'system', decision.sessionId)
+      grow(state, event, 'Life goal completed', 'An application verified a successful execution linked to a persistent life goal.')
+    })
+  }
+
+  /**
+   * Commit one sourced interest interpretation and a replay marker together.
+   * @param sessionId - Conversation whose committed exchange supplied the evidence.
+   * @param current - Current completed exchange; older turns are context only.
+   * @param proposals - Validated writer proposals, or an empty list for no change.
+   * @returns After durable publication; replay of this exchange has no effect.
+   */
+  reviewInterest(sessionId: SessionId, current: InterestDialogue['turns'][number], proposals: InterestProposal[]): Promise<void> {
+    return this.change((state) => {
+      if (this.config.interest === undefined || state.interests === undefined) throw new GenesisError('invalid-state', 'Enable interest before reviewing an exchange.')
+      const key = `interest-review:${sessionId}:${current.startSeq}`
+      if (state.events.some(event => event.dedupKey === key)) return
+      const autonomous = state.agency?.decisions.find(item => item.id === current.decisionId && item.trigger === 'event'
+        && item.sessionId === sessionId && ['responded', 'succeeded', 'failed'].includes(item.outcome.status))
+      const changed = new Set<string>()
+      for (const proposal of proposals) {
+        const interest = proposal.id === undefined ? undefined : state.interests.find(item => item.id === proposal.id)
+        if (proposal.id !== undefined && interest === undefined) throw new GenesisError('invalid-source', 'Interest writer referenced an absent interest. Retry from fresh state.')
+        if (interest !== undefined && interest.topic !== proposal.topic) throw new GenesisError('invalid-source', 'Interest topic cannot be silently renamed.')
+        const topicKey = proposal.topic.toLocaleLowerCase()
+        if (changed.has(topicKey) || (interest === undefined && state.interests.some(item => item.topic.toLocaleLowerCase() === topicKey))) {
+          throw new GenesisError('invalid-source', 'Interest writer repeated an existing topic.')
+        }
+        changed.add(topicKey)
+        if (interest === undefined && (proposal.signal === 'return' || proposal.signal === 'disinterest')) throw new GenesisError('invalid-source', 'A new topic needs an actual contact or exploration first.')
+        const messages = current.messages.filter(item => proposal.sourceSeqs.includes(item.seq))
+        const tools = current.tools.filter(item => item.resultSeq !== undefined && proposal.sourceSeqs.includes(item.resultSeq))
+        if (new Set(proposal.sourceSeqs).size !== proposal.sourceSeqs.length || messages.length + tools.length !== proposal.sourceSeqs.length
+          || (!messages.some(item => item.role === 'user') && (autonomous === undefined
+            || [...messages.map(item => item.seq), ...tools.map(item => item.resultSeq)].some(seq => !state.events.some(event =>
+              event.relatedSessionId === sessionId && event.relatedEventId === String(seq) && autonomous.outcome.sourceEventIds.includes(event.id)))))) {
+          throw new GenesisError('invalid-source', 'Interest changes must cite the current real user exchange or observed autonomous execution.')
+        }
+        if (proposal.signal !== 'contact' && !messages.some(item => item.role === 'assistant')) {
+          throw new GenesisError('invalid-source', 'Interest development requires an actual assistant response.')
+        }
+        if (proposal.selfInitiated && (proposal.signal !== 'return' || current.messages.some(item => item.role === 'user'
+          && item.text.toLocaleLowerCase().includes(proposal.topic.toLocaleLowerCase())))) {
+          throw new GenesisError('invalid-source', 'A prompted topic cannot count as a self-initiated return.')
+        }
+        if (proposal.signal === 'exploration' && !tools.some(item => item.success)
+          && !messages.some(item => item.role === 'assistant' && item.text.trim().length >= 80)) {
+          throw new GenesisError('invalid-source', 'Exploration requires a successful tool result or substantive visible creation.')
+        }
+        const sourceEventIds = [...(autonomous === undefined ? [] : autonomous.sourceEventIds.slice(0, 1)),
+          ...messages.map(message => fact(state, 'interaction.observed', `session:${sessionId}:${message.seq}`,
+            { kind: `${message.role}-message` }, message.role === 'user' ? 'user' : 'agent', sessionId, String(message.seq), message.timestamp).id),
+          ...tools.map(tool => fact(state, 'interaction.observed', `session:${sessionId}:${tool.resultSeq}`,
+            { kind: 'tool-result', tool: tool.name, success: tool.success === true }, 'tool', sessionId, String(tool.resultSeq), tool.timestamp).id)]
+        const now = new Date().toISOString()
+        const evidence: LifeInterest['evidence'][number] = { sessionId, startSeq: current.startSeq, signal: proposal.signal,
+          selfInitiated: proposal.selfInitiated, sourceEventIds }
+        const history = [...(interest?.evidence ?? []), evidence]
+        if (history.length > 100) throw new GenesisError('capacity', 'Interest evidence reached its configured record limit; export or correct it before continuing.')
+        const recent = history.slice(history.findLastIndex(item => item.signal === 'disinterest') + 1)
+        const exploration = recent.findIndex(item => item.signal === 'exploration')
+        const enduring = recent.length >= this.config.interest.minEnduringTurns && exploration >= 0
+          && recent.slice(exploration + 1).some(item => item.signal === 'return' && item.selfInitiated)
+        const stage: LifeInterest['stage'] = proposal.signal === 'disinterest' ? 'dormant'
+          : enduring ? 'enduring' : interest?.stage === 'enduring' ? 'enduring'
+            : proposal.signal === 'exploration' || proposal.signal === 'return' ? 'exploring'
+              : proposal.signal === 'curiosity' ? 'curious' : interest?.stage === 'dormant' ? 'contact'
+                : interest?.stage ?? 'contact'
+        const updated: LifeInterest = { id: interest?.id ?? brandString<InterestId>(randomUUID()), lifeId: state.identity.id,
+          topic: proposal.topic, stage, createdAt: interest?.createdAt ?? now, updatedAt: now,
+          reason: proposal.reason, evidence: history }
+        if (interest === undefined) {
+          if (state.interests.length >= this.config.interest.maxInterests) throw new GenesisError('capacity', 'Interest inventory is full. Increase interest.maxInterests before recording more topics.')
+          state.interests.push(updated)
+        } else state.interests[state.interests.indexOf(interest)] = updated
+        fact(state, 'interest.changed', `interest-change:${sessionId}:${current.startSeq}:${updated.id}`,
+          { interestId: updated.id, topic: updated.topic, before: interest?.stage ?? null, after: stage,
+            signal: proposal.signal, reason: proposal.reason, selfInitiated: proposal.selfInitiated, sourceEventIds },
+          'agent', sessionId, String(current.startSeq))
+      }
+      fact(state, 'interest.reviewed', key, { startSeq: current.startSeq, turn: current.turn, changes: proposals.length },
+        'agent', sessionId, String(current.startSeq))
+    })
   }
 
   /**
@@ -130,10 +451,124 @@ export class LifeCore {
   }
 
   /**
+   * Commit an emotion appraisal and its deduplication marker atomically with cited life evidence.
+   * @param sessionId - Source conversation, never another Session's text.
+   * @param evidence - Current exchange and optional earlier complete exchanges.
+   * @param revision - Emotion revision captured before inference; stale proposals are refused.
+   * @param update - Validated signed changes; omitted records a no-change decision.
+   * @returns After durable commit; replay is a no-op and storage uncertainty stops dependent operations.
+   */
+  reviewEmotion(sessionId: SessionId, evidence: EmotionDialogue['turns'], revision: number, update?: EmotionUpdate): Promise<void> {
+    return this.change((state) => {
+      const config = this.config.emotion
+      const current = evidence.at(-1)
+      if (config === undefined || state.emotion === undefined || current === undefined) {
+        throw new GenesisError('invalid-state', 'Enable emotion and provide the source exchange before emotion review.')
+      }
+      const settings = resolveEmotion(config, state.emotion)
+      if (!settings.enabled) throw new GenesisError('invalid-state', 'Automatic emotion appraisal is paused. No update was applied.')
+      const key = `emotion-review:${sessionId}:${current.startSeq}`
+      if (state.events.some(event => event.dedupKey === key)) return
+      if (state.events.some(event => event.type === 'emotion.reviewed' && event.relatedSessionId === sessionId
+        && typeof event.payload['startSeq'] === 'number' && event.payload['startSeq'] >= current.startSeq)) {
+        throw new GenesisError('invalid-source', 'Emotion evidence has been superseded by a newer exchange. Continue with fresh dialogue.')
+      }
+      if (state.emotion.revision !== revision) throw new GenesisError('configuration-conflict', 'Emotion changed during appraisal. Continue with fresh dialogue before applying another update.')
+      const before = emotionAt(state.emotion, new Date().toISOString())
+      const after = structuredClone(before)
+      const sourceEventIds: LifeEventId[] = []
+      let appraisal: ReturnType<typeof applyAppraisal> | undefined
+      if (update !== undefined) {
+        const messages = evidence.flatMap(turn => turn.messages)
+        const cited = messages.filter(message => update.sourceSeqs.includes(message.seq))
+        if (new Set(update.sourceSeqs).size !== update.sourceSeqs.length || cited.length !== update.sourceSeqs.length
+          || !current.messages.some(message => message.role === 'user' && update.sourceSeqs.includes(message.seq))) {
+          throw new GenesisError('invalid-source', 'Emotion updates must cite supplied dialogue and new real user evidence. No changes were applied.')
+        }
+        appraisal = applyAppraisal(after, update, settings, state.events,
+          current.messages.filter(message => message.role === 'user' && update.sourceSeqs.includes(message.seq)).map(message => message.text))
+        for (const message of cited) {
+          const event = fact(state, 'interaction.observed', `session:${sessionId}:${message.seq}`, { kind: `${message.role}-message` },
+            message.role === 'user' ? 'user' : 'agent', sessionId, String(message.seq), message.timestamp)
+          sourceEventIds.push(event.id)
+        }
+      }
+      after.revision += 1
+      state.emotion = after
+      fact(state, 'emotion.reviewed', key, { startSeq: current.startSeq, turn: current.turn, changed: update !== undefined,
+        before: emotionRecord(before), after: emotionRecord(after), sourceEventIds,
+        ...(update === undefined ? {} : { reason: update.reason, attribution: 'model-inference', appraisal: update.appraisal, ...(update.targets === undefined ? {} : { targets: update.targets }), ...appraisal }) }, 'agent', sessionId, String(current.startSeq))
+    })
+  }
+
+  /**
+   * Save operator emotion rules with revision fencing; recovery under the old rules precedes the change.
+   * @param settings - Validated complete operator choices; they take precedence over deployment defaults.
+   * @param revision - Last displayed emotion revision; concurrent appraisals or edits reject this write.
+   * @returns Committed revision; backup uncertainty stops dependent operations until verified reload.
+   */
+  configureEmotion(settings: EmotionSettings, revision: number): Promise<number> {
+    return this.change((state) => {
+      if (this.config.emotion === undefined || state.emotion === undefined) throw new GenesisError('invalid-state', 'Enable emotion in the active profile before changing its settings.')
+      if (state.emotion.revision !== revision) throw new GenesisError('configuration-conflict', 'Emotion changed. Reload the current values before saving your draft again.')
+      const before = emotionAt(state.emotion, new Date().toISOString())
+      const { sensitivity, baseline, shortHalfLifeMs, moodHalfLifeMs, needsHalfLifeMs, interactionHalfLifeMs, ...controls } = settings
+      const after = { ...before, sensitivity, baseline: { ...baseline }, shortHalfLifeMs: { ...shortHalfLifeMs },
+        moodHalfLifeMs: { ...moodHalfLifeMs }, needsHalfLifeMs, interactionHalfLifeMs, controls: { ...controls }, revision: revision + 1 }
+      state.emotion = after
+      fact(state, 'emotion.configured', `emotion:settings:${after.revision}`, { before: emotionRecord(before), after: emotionRecord(after),
+        reason: 'operator-settings', attribution: 'user-stated' }, 'user')
+      return after.revision
+    })
+  }
+
+  /**
+   * Set operator-selected absolute intensities without manufacturing dialogue evidence.
+   * @param adjustment - Validated immediate/mood/need values and nonempty operator reason.
+   * @param revision - Last displayed emotion revision; stale edits leave state unchanged.
+   * @returns Committed revision; the next request receives the adjusted state through logged context.
+   */
+  adjustEmotion(adjustment: EmotionAdjustment, revision: number): Promise<number> {
+    return this.change((state) => {
+      if (this.config.emotion === undefined || state.emotion === undefined) throw new GenesisError('invalid-state', 'Enable emotion in the active profile before adjusting it.')
+      if (state.emotion.revision !== revision) throw new GenesisError('configuration-conflict', 'Emotion changed. Reload the current values before saving your draft again.')
+      const before = emotionAt(state.emotion, new Date().toISOString())
+      const after = { ...before, current: { ...adjustment.current }, mood: { ...adjustment.mood }, needs: { ...adjustment.needs }, revision: revision + 1 }
+      state.emotion = after
+      fact(state, 'emotion.adjusted', `emotion:adjustment:${after.revision}`, { before: emotionRecord(before), after: emotionRecord(after),
+        reason: adjustment.reason, attribution: 'user-stated' }, 'user')
+      return after.revision
+    })
+  }
+
+  /**
+   * Replace the deployment operator's relationship estimates with an explicit attributed adjustment.
+   * @param adjustment - Validated display label, five values and audit reason.
+   * @param revision - Last observed emotion revision; conflicting changes reject atomically.
+   * @returns Committed emotion revision; manual estimates do not become dialogue evidence.
+   */
+  adjustRelationship(adjustment: RelationshipAdjustment, revision: number): Promise<number> {
+    return this.change((state) => {
+      if (this.config.emotion === undefined || state.emotion === undefined) throw new GenesisError('invalid-state', 'Enable emotion before adjusting the relationship.')
+      if (state.emotion.revision !== revision) throw new GenesisError('configuration-conflict', 'Emotion changed. Reload before saving the relationship.')
+      const before = emotionAt(state.emotion, new Date().toISOString())
+      const after = structuredClone(before)
+      after.relationship = { id: before.relationship?.id ?? brandString<RelationshipId>(randomUUID()), scope: 'operator',
+        label: adjustment.label, values: adjustment.values, confidence: { affection: 1, trust: 1, attachment: 1, familiarity: 1, feltSecurity: 1 },
+        origins: { affection: 'user-stated', trust: 'user-stated', attachment: 'user-stated', familiarity: 'user-stated', feltSecurity: 'user-stated' }, updatedAt: after.updatedAt }
+      after.revision++
+      state.emotion = after
+      fact(state, 'relationship.adjusted', `relationship:adjustment:${after.revision}`, { before: emotionRecord(before), after: emotionRecord(after),
+        reason: adjustment.reason, attribution: 'user-stated' }, 'user')
+      return after.revision
+    })
+  }
+
+  /**
    * Read committed naming, learned tools and the first conversation, without copying another Session's context.
    * @returns Detached global life progress; an untrusted or closed core rejects.
    */
-  learningStatus(): { ready: boolean; tools: string[]; firstSessionId?: SessionId } {
+  learningStatus(): { ready: boolean; tools: string[]; firstSessionId?: SessionId; firstConversationComplete: boolean } {
     this.assertUsable()
     if (this.learningState === undefined) throw new GenesisError('invalid-state', 'Genesis startup has not completed.')
     return structuredClone(this.learningState)
@@ -141,7 +576,7 @@ export class LifeCore {
 
   private publishLearning(state: LifeState): void {
     const first = state.events.find(event => event.type === 'life.conversation')?.relatedSessionId
-    this.learningState = { ready: state.identity.name !== null,
+    this.learningState = { firstConversationComplete: state.events.some(event => event.dedupKey === 'first-conversation-completed'), ready: state.identity.name !== null,
       tools: state.events.filter(event => event.type === 'capability.learned')
         .flatMap(event => typeof event.payload['tool'] === 'string' ? [event.payload['tool']] : []),
       ...(first === undefined ? {} : { firstSessionId: SessionId(first) }) }
@@ -167,13 +602,29 @@ export class LifeCore {
 
   /**
    * Bind the first accepted conversation once; subsequent Sessions retain their own context.
-   * @param sessionId - Session receiving an actual first user input.
+   * @param sessionId - Session receiving the first accepted user or built-in awakening input.
    * @returns After the first-conversation fact commits, or after an idempotent repeat.
    */
   beginConversation(sessionId: SessionId): Promise<void> {
     return this.change((state) => {
       if (state.identity.name === null) throw new GenesisError('invalid-state', 'Complete API configuration or sign-in, then name this life before chatting.')
       fact(state, 'life.conversation', 'first-conversation', {}, 'system', sessionId)
+    })
+  }
+
+  /**
+   * Record completion only after the canonical first Session commits a successful turn with a text reply.
+   * @param sessionId - Actual completed conversation.
+   * @param eventId - Durable turn-end sequence, retained as source evidence.
+   * @param timestamp - Source event time.
+   * @returns After the idempotent completion fact is durable; unrelated Sessions do not complete initialization.
+   */
+  completeFirstConversation(sessionId: SessionId, eventId: string, timestamp: string): Promise<void> {
+    return this.change((state) => {
+      const first = state.events.find(event => event.type === 'life.conversation')
+      if (first?.relatedSessionId !== sessionId) return
+      fact(state, 'interaction.observed', 'first-conversation-completed', { kind: 'first-conversation-completed' },
+        'system', sessionId, eventId, timestamp)
     })
   }
 
@@ -190,6 +641,50 @@ export class LifeCore {
       if (state.events.some(event => event.dedupKey === `learn:${tool}`)) return
       const event = fact(state, 'capability.learned', `learn:${tool}`, { tool }, 'agent', sessionId)
       grow(state, event, `${tool}: learned`, 'Learned the named tool. Availability and authorization are checked independently at execution.')
+    })
+  }
+
+  /**
+   * Record the stable private host directory without replacing an existing location silently.
+   * @param path - Prepared canonical directory authorized by deployment configuration.
+   * @returns After the location is durable; a conflicting configured location is refused.
+   */
+  setPersonalDirectory(path: string): Promise<void> {
+    return this.change((state) => {
+      const previous = state.events.find(event => event.dedupKey === 'personal-directory')
+      if (previous !== undefined && previous.payload['path'] !== path) throw new GenesisError('configuration-conflict', 'The personal directory differs from life history. Restore its configured location before restarting.')
+      fact(state, 'life.directory', 'personal-directory', { path }, 'system')
+    })
+  }
+
+  /**
+   * Save explicit operator identity with version-fenced current-memory relabeling.
+   * @param profile - Authenticated human-authored name and identity.
+   * @param revision - Displayed operator revision, zero before first configuration.
+   * @param versions - Complete memory set captured before inference; concurrent edits refuse publication.
+   * @param changes - Validated wording-only replacements and refreshed embeddings.
+   * @returns New identity revision; original interpretations remain in version history.
+   */
+  saveOperator(profile: OperatorIdentity, revision: number, versions: Array<{ id: MemoryId; updatedAt: string }>,
+    changes: MemoryRelabel[]): Promise<number> {
+    const parsed = operatorIdentitySchema.parse(profile)
+    return this.change((state) => {
+      if ((state.operator?.revision ?? 0) !== revision || versions.length !== state.memories.length
+        || versions.some(version => !state.memories.some(memory => memory.id === version.id && memory.updatedAt === version.updatedAt))) {
+        throw new GenesisError('configuration-conflict', 'Identity or memory changed during relabeling. Refresh before saving again.')
+      }
+      const next = revision + 1
+      const event = fact(state, 'life.operator', `operator:${next}`, { ...parsed, revision: next, rewritten: changes.map(change => change.id) }, 'user')
+      for (const change of changes) {
+        const index = state.memories.findIndex(memory => memory.id === change.id)
+        const old = state.memories[index]!
+        state.memories[index] = retainMemoryHistory(old, { ...old, content: change.content, embedding: change.embedding,
+          ...(change.habit === undefined ? {} : { habit: { ...old.habit!, ...change.habit } }),
+          ...(change.topics === undefined ? {} : { experience: { ...old.experience!, topics: change.topics } }),
+          sourceEventIds: memoryInputSchema.shape.sourceEventIds.parse([...new Set([...old.sourceEventIds, event.id])]), updatedAt: memoryTime(old) })
+      }
+      state.operator = { ...parsed, revision: next }
+      return next
     })
   }
 
@@ -232,11 +727,11 @@ export class LifeCore {
   }
 
   /**
-   * Compare real visible tool declarations in one Session scope. Permission
-   * remains execution-time policy; declaration changes do not imply tested skill.
+   * Record the first tool inventory as a baseline, then compare declarations in the same Session.
+   * Baselines are observations, not growth; permissions and learned skills remain independent.
    * @param sessionId - Scope whose previous observation is compared.
-   * @param tools - Current registry projection after scope restrictions.
-   * @returns After changed capabilities and their growth history commit together.
+   * @param tools - Current registry projection before the character's learned-tool restriction.
+   * @returns After the baseline or subsequent capability changes commit with their source events.
    */
   scan(sessionId: SessionId, tools: readonly ToolSchema[]): Promise<void> {
     return this.change((state) => {
@@ -244,6 +739,16 @@ export class LifeCore {
       const visible = new Map(tools.map(tool => [brandString<CapabilityId>(tool.name),
         createHash('sha256').update(JSON.stringify(tool)).digest('hex')]))
       const now = new Date().toISOString()
+      if (!Object.hasOwn(state.sessions, sessionId)) {
+        const baseline = [...visible].map(([id, declarationHash]) => ({ id, declarationHash, firstSeenAt: now, changedAt: now,
+          available: true, verification: 'unverified' as const, permission: 'checked-at-execution' as const }))
+        Object.defineProperty(state.sessions, sessionId, { value: baseline, enumerable: true, writable: true, configurable: true })
+        fact(state, 'capability.discovered', `inventory:${sessionId}`, { baseline: true,
+          capabilities: baseline.map(item => ({ capabilityId: item.id, declarationHash: item.declarationHash })),
+          verification: 'unverified', permission: 'checked-at-execution',
+        }, 'system', sessionId, undefined, now)
+        return
+      }
       for (const [id, hash] of visible) {
         const old = previous.find(capability => capability.id === id)
         if (old !== undefined && old.available && old.declarationHash === hash) continue
@@ -280,6 +785,7 @@ export class LifeCore {
    */
   remember(input: MemoryInput): Promise<LifeMemory> {
     const parsed = memoryInputSchema.parse(input)
+    parsed.content = memoryTimeText(parsed.content)
     return this.change((state) => {
       this.checkSources(state, parsed.sourceEventIds)
       const previous = state.memories.find(memory => memory.content === parsed.content && memory.category === parsed.category
@@ -302,13 +808,18 @@ export class LifeCore {
    */
   updateMemory(id: MemoryId, input: MemoryInput): Promise<LifeMemory | undefined> {
     const parsed = memoryInputSchema.parse(input)
+    parsed.content = memoryTimeText(parsed.content)
     return this.change((state) => {
       this.checkSources(state, parsed.sourceEventIds)
       const index = state.memories.findIndex(memory => memory.id === id)
       const old = state.memories[index]
       if (old === undefined) return undefined
+      if (old.experience !== undefined && parsed.category !== 'episodic') {
+        throw new GenesisError('invalid-source', 'An experience must retain its episodic category.')
+      }
       const { embedding: _oldEmbedding, ...retained } = old
-      const memory = { ...retained, ...parsed, updatedAt: new Date().toISOString() }
+      const memory = retainMemoryHistory(old, { ...retained, ...parsed,
+        updatedAt: memoryTime(old) })
       state.memories[index] = memory
       fact(state, 'memory.updated', `memory-update:${randomUUID()}`, { memoryId: id }, 'agent')
       return memory
@@ -316,16 +827,102 @@ export class LifeCore {
   }
 
   /**
-   * Delete memory content while retaining an audit fact and its original sources.
+   * Create a sourced operator candidate or directly edit its current projection without an edit event or revision history.
+   * @param id - Client-allocated UUID; retaining it makes retries of a new entry idempotent.
+   * @param draft - Editable candidate fields, never caller-supplied source references.
+   * @param updatedAt - Observed version, or null for a new entry.
+   * @param maxImplicit - Non-declarative count budget.
+   * @returns Committed candidate retaining its identity and earlier sources when edited.
+   */
+  editMemory(id: MemoryId, draft: MemoryDraft, updatedAt: string | null, maxImplicit: number): Promise<LifeMemory> {
+    z.uuid().parse(id)
+    const parsed = memoryInputSchema.omit({ sourceEventIds: true, attribution: true }).required({ kind: true }).parse(draft)
+    parsed.content = memoryTimeText(parsed.content)
+    return this.change((state) => {
+      const old = state.memories.find(item => item.id === id)
+      if (old?.experience !== undefined && parsed.category !== 'episodic') {
+        throw new GenesisError('invalid-source', 'An experience must retain its episodic category.')
+      }
+      const same = old !== undefined && old.content === parsed.content && old.category === parsed.category
+        && old.kind === parsed.kind && old.importance === parsed.importance && old.confidence === parsed.confidence
+      if (updatedAt === null && old !== undefined) {
+        if (same) return old
+        throw new GenesisError('configuration-conflict', 'This new-memory request already exists with different content. Refresh before editing.')
+      }
+      if (updatedAt !== null && (old === undefined || old.updatedAt !== updatedAt)) {
+        throw new GenesisError('configuration-conflict', 'This memory changed or was removed. Refresh before saving.')
+      }
+      if (same) return old
+      const now = memoryTime(old)
+      const source = old === undefined ? fact(state, 'interaction.observed', `manual-source:${randomUUID()}`, {
+        kind: 'manual-memory-entry', memoryId: id, contentHash: createHash('sha256').update(JSON.stringify(parsed)).digest('hex'),
+      }, 'user') : undefined
+      const memory: LifeMemory = { ...parsed, id, lifeId: state.identity.id, attribution: 'user-stated',
+        sourceEventIds: old?.sourceEventIds ?? [source!.id],
+        createdAt: old?.createdAt ?? now, updatedAt: now,
+        ...(old?.history === undefined ? {} : { history: old.history }),
+        ...(old?.experience === undefined || parsed.category !== 'episodic' ? {} : { experience: old.experience }),
+        ...(old?.experienceIds === undefined ? {} : { experienceIds: old.experienceIds }),
+        ...(old?.content === parsed.content && old.embedding !== undefined ? { embedding: old.embedding } : {}) }
+      if (old?.habit !== undefined) state.suppressedHabitEvidence = [...new Set([
+        ...(state.suppressedHabitEvidence ?? []), ...old.habit.supportEventIds,
+      ])]
+      if (old === undefined) state.memories.push(memory)
+      else state.memories[state.memories.indexOf(old)] = memory
+      this.checkImplicit(state, maxImplicit)
+      queueConsolidation(state)
+      if (old === undefined) fact(state, 'memory.created', `manual-write:${randomUUID()}`, { memoryId: id }, 'user')
+      return memory
+    })
+  }
+
+  /**
+   * Change only the memory layer, retaining content, sources, identity and its embedding.
+   * @param id - Existing memory.
+   * @param kind - Explicit operator choice.
+   * @param updatedAt - Version observed by the editor; stale conversions are refused.
+   * @param maxImplicit - Whole-life non-declarative count budget.
+   * @returns Converted memory; an idempotent same-layer request leaves history unchanged.
+   */
+  convertMemory(id: MemoryId, kind: 'declarative' | 'non-declarative', updatedAt: string, maxImplicit: number): Promise<LifeMemory> {
+    return this.change((state) => {
+      const memory = state.memories.find(item => item.id === id)
+      if (memory === undefined) throw new GenesisError('invalid-source', 'This memory was removed. Refresh the memory list.')
+      if (memory.updatedAt !== updatedAt) throw new GenesisError('configuration-conflict', 'This memory changed. Refresh before converting it.')
+      const previous = memory.kind ?? (memory.category === 'procedural' ? 'non-declarative' : 'declarative')
+      if (previous === kind) return memory
+      const converted = { ...memory, kind, updatedAt: memoryTime(memory) }
+      if (kind === 'declarative' && memory.habit !== undefined) state.suppressedHabitEvidence = [...new Set([
+        ...(state.suppressedHabitEvidence ?? []), ...memory.habit.supportEventIds,
+      ])]
+      state.memories[state.memories.indexOf(memory)] = converted
+      this.checkImplicit(state, maxImplicit)
+      queueConsolidation(state)
+      return converted
+    })
+  }
+
+  /**
+   * Delete current memory content; automatic deletion records a fact, while operator deletion creates no edit history.
    * @param id - Memory identifier.
+   * @param updatedAt - Optional displayed version; when supplied, concurrent edits are refused.
    * @returns Whether a memory was durably removed.
    */
-  deleteMemory(id: MemoryId): Promise<boolean> {
+  deleteMemory(id: MemoryId, updatedAt?: string): Promise<boolean> {
     return this.change((state) => {
       const index = state.memories.findIndex(memory => memory.id === id)
       if (index === -1) return false
+      if (updatedAt !== undefined && state.memories[index]?.updatedAt !== updatedAt) {
+        throw new GenesisError('configuration-conflict', 'This memory changed. Refresh before deleting it.')
+      }
+      const habit = state.memories[index]?.habit
+      unlinkExperience(state, id)
       state.memories.splice(index, 1)
-      fact(state, 'memory.deleted', `memory-delete:${randomUUID()}`, { memoryId: id }, 'agent')
+      queueConsolidation(state)
+      if (updatedAt === undefined) fact(state, 'memory.deleted', `memory-delete:${randomUUID()}`, { memoryId: id }, 'agent')
+      else if (habit !== undefined) state.suppressedHabitEvidence = [...new Set([
+        ...(state.suppressedHabitEvidence ?? []), ...habit.supportEventIds,
+      ])]
       return true
     })
   }
@@ -360,44 +957,165 @@ export class LifeCore {
    * @param key - Stable source turn or explicit user-memory request key.
    * @param changes - Validated changes; all references must belong to this life.
    * @param maxImplicit - Whole-life non-declarative record limit.
+   * @param experience - Optional remembered event; commits atomically with the derived entries.
+   * @param evidence - Completed user exchange metadata for independent habit support and durable maintenance.
    * @returns After all changes and the replay marker commit, or no-op on replay.
    */
-  reviewMemory(key: string, changes: MemoryChange[], maxImplicit: number): Promise<void> {
+  reviewMemory(key: string, changes: MemoryChange[], maxImplicit: number,
+    experience?: ExperienceChange, evidence?: ReviewEvidence): Promise<void> {
     return this.change((state) => {
       if (state.events.some(event => event.dedupKey === `memory-review:${key}`)) return
+      let experienceId: MemoryId | undefined
+      if (experience !== undefined) {
+        const parsed = memoryInputSchema.parse(experience.input)
+        const details = experienceSchema.parse(experience.details)
+        parsed.content = memoryTimeText(parsed.content)
+        details.topics = details.topics.map(memoryTimeText)
+        this.checkSources(state, parsed.sourceEventIds)
+        const old = experience.id === undefined ? undefined : state.memories.find(item => item.id === experience.id)
+        if ((experience.id !== undefined && old?.experience === undefined) || parsed.category !== 'episodic'
+          || (old?.experience !== undefined && old.experience.sessionId !== details.sessionId)) {
+          throw new GenesisError('invalid-source', 'Experience update requires a supplied event from the same conversation.')
+        }
+        experienceId = old?.id ?? brandString<MemoryId>(randomUUID())
+        const now = memoryTime(old)
+        const memory = retainMemoryHistory(old, { ...parsed, id: experienceId, lifeId: state.identity.id,
+          experience: details, embedding: experience.embedding, createdAt: old?.createdAt ?? now, updatedAt: now })
+        if (old === undefined) state.memories.push(memory)
+        else state.memories[state.memories.indexOf(old)] = memory
+        fact(state, old === undefined ? 'memory.created' : 'memory.updated', `experience:${randomUUID()}`, { memoryId: memory.id }, 'agent')
+      }
       for (const change of changes) {
         if (change.action === 'delete') {
           const index = state.memories.findIndex(memory => memory.id === change.id)
           if (index < 0) throw new GenesisError('invalid-source', 'Memory writer referenced an absent memory. Retry with a fresh search.')
+          if (change.id === experienceId) throw new GenesisError('invalid-source', 'A remembered experience cannot be deleted in the same plan.')
+          unlinkExperience(state, change.id)
           state.memories.splice(index, 1)
           fact(state, 'memory.deleted', `memory-delete:${randomUUID()}`, { memoryId: change.id }, 'agent')
           continue
         }
         const parsed = memoryInputSchema.parse(change.input)
+        parsed.content = memoryTimeText(parsed.content)
         this.checkSources(state, parsed.sourceEventIds)
         const old = change.id === undefined ? undefined : state.memories.find(memory => memory.id === change.id)
         if (change.id !== undefined && old === undefined) {
           throw new GenesisError('invalid-source', 'Memory writer referenced an absent memory. Retry with a fresh search.')
         }
-        const now = new Date().toISOString()
-        const memory: LifeMemory = { ...parsed, embedding: change.embedding,
+        if (old?.experience !== undefined && parsed.category !== 'episodic') {
+          throw new GenesisError('invalid-source', 'An experience must retain its episodic category.')
+        }
+        const now = memoryTime(old)
+        const memory: LifeMemory = retainMemoryHistory(old, { ...parsed, embedding: change.embedding,
           id: old?.id ?? brandString<MemoryId>(randomUUID()), lifeId: state.identity.id,
-          createdAt: old?.createdAt ?? now, updatedAt: now }
+          createdAt: old?.createdAt ?? now, updatedAt: now,
+          ...(old?.experience === undefined ? {} : { experience: old.experience }),
+          experienceIds: [...new Set([...(old?.experienceIds ?? []), ...(experienceId === undefined ? [] : [experienceId])])] })
         if (old === undefined) state.memories.push(memory)
         else state.memories[state.memories.indexOf(old)] = memory
         fact(state, old === undefined ? 'memory.created' : 'memory.updated', `memory-write:${randomUUID()}`, { memoryId: memory.id }, 'agent')
       }
-      if (state.memories.filter(memory => memory.kind === 'non-declarative'
-        || (memory.kind === undefined && memory.category === 'procedural')).length > maxImplicit) {
-        throw new GenesisError('capacity', 'Non-declarative memory exceeds maxImplicitMemories. Consolidate or remove entries before retrying.')
+      this.checkImplicit(state, maxImplicit)
+      fact(state, 'memory.reviewed', `memory-review:${key}`, { changes: changes.length + (experience === undefined ? 0 : 1),
+        ...(evidence === undefined ? {} : { feedbackTurn: `${evidence.sessionId}:${evidence.turn}`, userEventIds: evidence.userEventIds }) }, 'agent')
+      if (evidence !== undefined && (changes.length > 0 || experience !== undefined)) queueConsolidation(state, evidence.sessionId)
+    })
+  }
+
+  /**
+   * Persist the operator's maintenance preference independently of deployment defaults.
+   * @param enabled - Whether idle maintenance may run.
+   * @returns After the preference commits; pending work is retained when disabled.
+   */
+  setConsolidation(enabled: boolean): Promise<void> {
+    return this.change((state) => { queueConsolidation(state, undefined, false)
+      if (state.consolidation) state.consolidation.enabled = enabled
+    })
+  }
+
+  /**
+   * Request one maintenance pass over current memories, retaining its source Session for the inference audit.
+   * @returns After pending work and a fresh retry budget commit; absent conversation evidence is refused.
+   */
+  requestConsolidation(): Promise<void> {
+    return this.change((state) => {
+      queueConsolidation(state)
+      if (state.consolidation?.sessionId === undefined) throw new GenesisError('invalid-source', 'Complete a conversation before consolidating memories.')
+      state.consolidation.failures = 0
+      delete state.consolidation.failure
+    })
+  }
+
+  /**
+   * Commit one bounded consolidation with an optimistic revision check and replay marker.
+   * @param plan - Validated changes and the exact selected memory versions.
+   * @param maxImplicit - Whole-life prompt memory limit.
+   * @returns Whether the pass committed; concurrent edits leave work pending.
+   */
+  consolidate(plan: ConsolidationCommit, maxImplicit: number): Promise<boolean> {
+    return this.change((state) => {
+      const changes = plan.changes.map(change => ({ ...change,
+        input: { ...change.input, content: memoryTimeText(change.input.content) },
+        ...(change.habit === undefined ? {} : { habit: { ...change.habit,
+          cue: memoryTimeText(change.habit.cue), response: memoryTimeText(change.habit.response) } }),
+      }))
+      if (!applyConsolidation(state, { ...plan, changes })) return false
+      this.checkImplicit(state, maxImplicit)
+      fact(state, 'memory.consolidated', `consolidation:${plan.revision}`, { revision: plan.revision,
+        memoryIds: plan.versions.map(item => item.id), changes: plan.changes.length }, 'agent', state.consolidation?.sessionId)
+      return true
+    })
+  }
+
+  /**
+   * Atomically replace selected memories with their sourced synthesis.
+   * @param request - Stable request and exact source versions.
+   * @param changes - Validated, embedded interpretations citing selected memories.
+   * @param sessionId - Durable auxiliary inference audit Session.
+   * @returns Committed results; retries return the same identities.
+   */
+  organizeMemories(request: MemoryOrganizationRequest, changes: OrganizedMemory[], sessionId: SessionId): Promise<LifeMemory[]> {
+    return this.change((state) => {
+      const previous = organizationReplay(state, request)
+      if (previous !== undefined) return previous
+      const prepared = changes.map(change => ({ ...change, input: { ...change.input, content: memoryTimeText(change.input.content) } }))
+      organizationSources(state, request)
+      const selected = new Set(request.sources.map(source => source.id))
+      for (const change of changes) {
+        this.checkSources(state, change.input.sourceEventIds)
+        if (change.evidenceIds.some(id => !selected.has(id))) throw new GenesisError('invalid-source', 'Organization referenced unselected evidence.')
       }
-      const implicit = state.memories.filter(memory => memory.kind === 'non-declarative'
-        || (memory.kind === undefined && memory.category === 'procedural'))
-        .map(({ embedding: _embedding, ...memory }) => memory)
-      if (JSON.stringify(implicit).length > this.config.memoryChars) {
-        throw new GenesisError('capacity', 'Non-declarative memory exceeds memoryChars. Consolidate entries before retrying.')
+      const results = prepared.map(change => appendOrganizedMemory(state, change))
+      const event = fact(state, 'memory.organized', `memory-organization:${request.id}`, {
+        request: { id: request.id, sources: request.sources.map(source => ({ ...source })), targetCount: request.targetCount },
+        memoryIds: results.map(memory => memory.id),
+        evidence: changes.map((change, index) => ({ memoryId: results[index]!.id, sourceMemoryIds: change.evidenceIds })),
+      }, 'user', sessionId)
+      for (const memory of results) memory.sourceEventIds = [...new Set([...memory.sourceEventIds, event.id])]
+      for (const source of request.sources) {
+        unlinkExperience(state, source.id)
+        state.memories.splice(state.memories.findIndex(memory => memory.id === source.id), 1)
+        fact(state, 'memory.deleted', `organization-delete:${request.id}:${source.id}`, {
+          memoryId: source.id, organizationEventId: event.id,
+        }, 'user', sessionId)
       }
-      fact(state, 'memory.reviewed', `memory-review:${key}`, { changes: changes.length }, 'agent')
+      return results
+    })
+  }
+
+  /**
+   * Retain a safe failed maintenance outcome without discarding pending evidence.
+   * @param revision - Work revision that failed; superseded work keeps its own retry budget.
+   * @param failure - Classified, redacted diagnostic from the operation owner.
+   * @returns After the diagnostic commits, or a no-op for superseded work.
+   */
+  failConsolidation(revision: number, failure: ReviewFailure): Promise<void> {
+    return this.change((state) => {
+      const work = state.consolidation
+      if (work === undefined || work.revision !== revision) return
+      work.failures++
+      work.lastAttemptAt = new Date().toISOString()
+      work.failure = failure
     })
   }
 
@@ -414,19 +1132,19 @@ export class LifeCore {
       const ageDays = Math.max(0, Date.now() - Date.parse(memory.updatedAt)) / 86_400_000
       return matches * 10 + memory.importance + 1 / (1 + ageDays)
     }
-    let remaining = Math.max(0, query.chars)
+    const chars = Math.max(0, query.chars)
     const result: LifeMemory[] = []
     for (const memory of state.memories.filter(memory =>
       (query.category === undefined || memory.category === query.category)
       && (query.after === undefined || memory.createdAt >= query.after)
       && (query.before === undefined || memory.createdAt <= query.before)
-      && (terms.length === 0 || terms.some(term => memory.content.toLowerCase().includes(term))))
+      && (terms.length === 0 || memory.id === query.text.trim() || terms.some(term => [memory.content,
+        ...(memory.experience?.topics ?? []), ...(memory.history ?? []).map(version => version.content)]
+        .some(text => text.toLowerCase().includes(term)))))
       .sort((a, b) => score(b) - score(a) || b.updatedAt.localeCompare(a.updatedAt))) {
       if (result.length >= Math.max(0, Math.min(query.limit, this.config.queryLimit))) break
-      const chars = JSON.stringify(memory).length
-      if (chars > remaining) continue
+      if (JSON.stringify([...result, memory]).length > chars) continue
       result.push(memory)
-      remaining -= chars
     }
     return result
   }
@@ -460,20 +1178,26 @@ export class LifeCore {
         fact(state, 'life.stopped', `stop:${randomUUID()}`, {})
         await this.persist(state)
       } finally {
-        await this.domain.close()
+        try { await this.records.close() } finally { await this.domain.close() }
       }
     })
     return this.closing
   }
 
   private state(): LifeState {
-    const state = this.domain.table('states').get('life')
+    const state = this.committed
     if (state === undefined) throw new GenesisError('invalid-state', 'Genesis identity is absent. Stop dependent work and inspect storage.')
     return state
   }
   private assertUsable(): void {
     if (this.failure !== undefined) throw this.failure
     if (this.stopping) throw new GenesisError('closed', 'Genesis is stopping; no new operations are accepted.')
+  }
+  private checkImplicit(state: LifeState, maxImplicit: number): void {
+    const implicit = state.memories.filter(memory => memory.kind === 'non-declarative'
+      || (memory.kind === undefined && memory.category === 'procedural')).map(({ embedding: _embedding, ...memory }) => memory)
+    if (implicit.length > maxImplicit) throw new GenesisError('capacity', 'Non-declarative memory exceeds maxImplicitMemories. Consolidate or remove entries before retrying.')
+    if (JSON.stringify(implicit).length > this.config.memoryChars) throw new GenesisError('capacity', 'Non-declarative memory exceeds memoryChars. Consolidate entries before retrying.')
   }
   private checkSources(state: LifeState, sources: LifeEventId[]): void {
     if (sources.some(id => !state.events.some(event => event.id === id))) {
@@ -489,6 +1213,7 @@ export class LifeCore {
       const state = structuredClone(this.state())
       const before = JSON.stringify(state)
       const result = operation(state)
+      stateSchema.parse(state)
       if (JSON.stringify(state) !== before) await this.persist(state)
       return structuredClone(result)
     })
@@ -498,18 +1223,45 @@ export class LifeCore {
     return pending
   }
   private async persist(state: LifeState): Promise<void> {
-    const count = state.events.length + state.memories.length + state.growth.length
+    const count = state.events.length + state.memories.length
+      + (state.agency === undefined ? 0 : state.agency.motivations.length + state.agency.decisions.length
+        + state.agency.goals.reduce((total, goal) => total + 1 + goal.history.length, 0))
+      + (state.interests?.length ?? 0) + (state.interests?.reduce((total, interest) => total + interest.evidence.length, 0) ?? 0)
+      + (state.suppressedHabitEvidence?.length ?? 0)
+      + state.memories.reduce((total, memory) => total + (memory.history?.length ?? 0), 0)
+      + state.growth.length
       + Object.values(state.sessions).reduce((total, capabilities) => total + capabilities.length + 1, 0)
     if (count > this.config.maxRecords || JSON.stringify(state).length > this.config.maxStateChars) {
       throw new GenesisError('capacity', 'Genesis history reached its configured capacity. Increase the limit or export history before retrying; records were not discarded.')
     }
     try {
-      await this.domain.table('states').put('life', state)
-      await writeBackup(backupPath(this.config.leasePath, this.config.backupPath), state)
+      const { manifest, records } = splitState(state)
+      for (const { table, key, value } of records) {
+        if (this.records.table(table).get(key) === undefined) await this.records.table(table).put(key, value)
+      }
+      await this.domain.table('states').put('life', manifest)
+      await writeBackup(backupPath(this.config.leasePath, this.config.backupPath), { manifest, records }, this.backedUp)
+      this.backedUp = manifest
+      const retained = new Set(manifest.records.map(ref => `${ref.table}:${ref.key}`))
+      for (const table of Object.keys(lifeRecordsDomain.tables)) {
+        for (const key of this.records.table(table).keys()) {
+          if (!retained.has(`${table}:${key}`)) await this.records.table(table).delete(key)
+        }
+      }
+      this.committed = state
       this.publishLearning(state)
     } catch (error) {
       this.failure = new GenesisError('storage', 'Genesis primary commit or local backup failed; the primary may already be committed. Stop dependent work, inspect both stores and reload from verified data.', { cause: error })
       throw this.failure
     }
+  }
+}
+
+function memoryTime(previous?: LifeMemory): string {
+  return new Date(Math.max(Date.now(), previous === undefined ? 0 : Date.parse(previous.updatedAt) + 1)).toISOString()
+}
+function unlinkExperience(state: LifeState, id: MemoryId): void {
+  for (const memory of state.memories) {
+    if (memory.experienceIds?.includes(id)) memory.experienceIds = memory.experienceIds.filter(value => value !== id)
   }
 }

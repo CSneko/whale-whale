@@ -3,36 +3,67 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-system-prompt'
+import { GenesisAgencyGateway } from './agency-gateway.ts'
+import { LifeDeliberationEngine, DELIBERATION_GUIDANCE, agencyContext } from './deliberation.ts'
+import { MemoryConsolidator } from './consolidation.ts'
 import { Config } from './config.ts'
+import { LifeEmotionEngine, EMOTION_GUIDANCE } from './emotion.ts'
+import { MAX_EMOTION_WINDOW_TURNS, emotionSettingsSchema, resolveEmotion, initialEmotion } from './emotion-state.ts'
+import { emotionProjection } from './emotion-projection.ts'
+import { interestProjection } from './interest-projection.ts'
+import { LifeInterestEngine, INTEREST_GUIDANCE } from './interest.ts'
 import { LifeCore } from './core.ts'
 import { GUIDANCE, selfContext } from './context.ts'
-import { lifeDomain } from './model.ts'
+import { lifeRecordsDomain, lifeDomain } from './model.ts'
+import { statusFailure } from './status-error.ts'
 import { GenesisError } from './error.ts'
 import { acquireLease } from './lease.ts'
+import { preparePersonalDirectory } from './personal-directory.ts'
+import { PARTICIPANT_GUIDANCE } from './participants.ts'
 import { GenesisStatusGateway } from './status.ts'
+import { GenesisMemoryGateway } from './memory-gateway.ts'
+import { manualMemoryProjection } from './manual-projection.ts'
 import { registerTools } from './tools.ts'
 import { LifeMemoryEngine, MEMORY_GUIDANCE } from './memory.ts'
 import { backupPath } from './backup.ts'
-import { installLearning, LEARN_TOOL, LIFE_GUIDANCE } from './awakening.ts'
+import type {} from '@deepseek-ai/dsh-agent-preset-registry'
+import { ModelPreferences, modelPreferencesDomain } from './model-preferences.ts'
+import { EmbeddingPreferences, embeddingPreferencesDomain } from './embedding-preferences.ts'
+import { installLearning, LEARN_TOOL, RECALL_TOOL, LIFE_GUIDANCE } from './awakening.ts'
+import { WritingRecords } from './records.ts'
+import { writingsDomain } from './records-model.ts'
+import { prepareWritingRoot } from './records-files.ts'
+import { GenesisRecordsGateway } from './records-gateway.ts'
+import { registerWritingTool } from './records-tool.ts'
 
+export { LifeDeliberationEngine } from './deliberation.ts'
+export type * from './agency-state.ts'
+export type { DeliberationCommit } from './agency.ts'
 export { Config } from './config.ts'
+export { GenesisMemoryGateway } from './memory-gateway.ts'
 export { GenesisStatusGateway } from './status.ts'
-export type { LifeStatus } from './status-types.ts'
+export { GenesisRecordsGateway } from './records-gateway.ts'
+export { GenesisAgencyGateway } from './agency-gateway.ts'
+export type { LifeStatus, AgencyStatus } from './status-types.ts'
 export { LifeCore } from './core.ts'
 export { GenesisError } from './error.ts'
+export type { EmotionState, Mood, Needs, EmotionCurrent, MoodHalfLives, EmotionHalfLives, EmotionSettings, EmotionAdjustment } from './emotion-state.ts'
 export type * from './model.ts'
-export type { EventQuery, MemoryQuery, ObservedInteraction, MemoryChange } from './core.ts'
+export type { ConsolidationCommit, ConsolidationChange, ReviewEvidence } from './consolidation-state.ts'
+export type { EventQuery, MemoryQuery, ObservedInteraction, MemoryChange, ExperienceChange } from './core.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
     /** One persistent life shared by all Sessions in this composition. */
     genesis: LifeCore
+    /** Optional trusted autonomous deliberation entry; use ctx.get when optional. */
+    genesisDeliberation: LifeDeliberationEngine
   }
 }
 /** Loader plugin identifier. */
 export const name = 'experimental-genesis'
 /** Storage, scoped tools, prompts and real lifecycle owners must already exist. */
-export const inject = ['storageDomain', 'tools', 'systemPrompt', 'agents', 'llm']
+export const inject = ['storageDomain', 'tools', 'systemPrompt', 'agents', 'llm', 'sessionProjections', 'sandboxPolicy']
 
 /**
  * Acquire exclusive life storage, restore identity and mount reversible contributions.
@@ -41,19 +72,34 @@ export const inject = ['storageDomain', 'tools', 'systemPrompt', 'agents', 'llm'
  * @returns After the life is restored and every registration is available.
  */
 export async function apply(ctx: Context, config: Config): Promise<void> {
+  if (config.records !== undefined && config.personalDirectory === undefined) {
+    throw new GenesisError('invalid-state', 'Recording requires personalDirectory. Configure a private personal directory before enabling records.')
+  }
   if (config.awakening !== undefined && config.memory === undefined) {
     throw new GenesisError('invalid-state', 'Awakening requires the independent memory pipeline. Configure memory before enabling awakening.')
   }
+  if (config.emotion !== undefined && config.memory === undefined) {
+    throw new GenesisError('invalid-state', 'Emotion requires independent decision and writer routes. Configure memory before enabling emotion.')
+  }
+  if (config.deliberation !== undefined && config.memory === undefined) {
+    throw new GenesisError('invalid-state', 'Deliberation requires the independent memory writer route. Configure memory before enabling deliberation.')
+  }
+  if (config.interest !== undefined && config.memory === undefined) {
+    throw new GenesisError('invalid-state', 'Interest requires the independent memory writer route. Configure memory before enabling interest.')
+  }
+  if (config.emotion !== undefined) emotionSettingsSchema.parse(resolveEmotion(config.emotion, initialEmotion(config.emotion, new Date().toISOString())))
   backupPath(config.leasePath, config.backupPath)
   const release = await acquireLease(config.leasePath)
   let core: LifeCore
   try {
     const domain = await ctx.storageDomain.open(lifeDomain)
-    core = new LifeCore(domain, config)
+    let records
+    try { records = await ctx.storageDomain.open(lifeRecordsDomain) } catch (error) { await domain.close(); throw error }
+    core = new LifeCore(domain, config, records)
     try {
       await core.start()
     } catch (error) {
-      await domain.close()
+      try { await records.close() } finally { await domain.close() }
       throw error
     }
   } catch (error) {
@@ -64,35 +110,102 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     try { await core.close() } finally { await release() }
   })
   ctx.provide('genesis', core)
-  const memory = config.memory === undefined ? undefined : new LifeMemoryEngine(ctx, core, config, config.memory)
+  const personal = config.personalDirectory === undefined ? undefined : await preparePersonalDirectory(ctx, core, config.personalDirectory)
+  let records: WritingRecords | undefined
+  if (config.records !== undefined && personal !== undefined) {
+    const root = await prepareWritingRoot(personal)
+    records = new WritingRecords(await ctx.storageDomain.open(writingsDomain), root, (await core.snapshot()).identity.id, config.records)
+    const owner = records
+    ctx.effect(() => () => owner.close())
+    await records.start()
+    registerWritingTool(ctx, records, config.records)
+  }
+  await ctx.plugin(GenesisRecordsGateway, { records })
+  const preferences = new EmbeddingPreferences(await ctx.storageDomain.open(embeddingPreferencesDomain), config)
+  ctx.effect(() => () => preferences.close())
+  const models = new ModelPreferences(await ctx.storageDomain.open(modelPreferencesDomain), config)
+  ctx.effect(() => () => models.close())
+  const lifeMode = (agent: Agent | undefined) => config.awakening !== undefined && (config.awakening.lifePreset === undefined
+    || (agent !== undefined && ctx.get('agentPresets')?.composedPreset(agent.ctx) === config.awakening.lifePreset))
+  const deliberation = config.deliberation === undefined || config.memory === undefined ? undefined
+    : new LifeDeliberationEngine(ctx, core, config, config.deliberation, config.memory, () => models.read().models,
+      agent => config.awakening === undefined || lifeMode(agent))
+  if (deliberation !== undefined) {
+    ctx.provide('genesisDeliberation', deliberation)
+    ctx.effect(() => () => deliberation.close())
+    ctx.on('agent/turn-stopping', async ({ agent }) => { await deliberation.settle(agent, false) }, { global: true })
+  }
+  const memory = config.memory === undefined ? undefined
+    : new LifeMemoryEngine(ctx, core, config, config.memory, () => preferences.read().embedding, () => models.read().models)
+  const consolidation = memory === undefined || config.memory === undefined ? undefined
+    : new MemoryConsolidator(ctx, core, memory, config.memory)
   if (memory !== undefined) {
     ctx.effect(() => () => memory.close())
     ctx.on('agent/turn-stopping', async ({ agent, turn, signal }) => {
       try { await memory.review(agent, turn, signal) } catch (error) {
-        ctx.logger.error(`Genesis memory review failed. A storage or backup failure may follow a committed update; inspect storage before retrying. Otherwise check model and embedding configuration. ${error instanceof GenesisError ? error.code : 'memory-provider'}`)
-        throw error
+        ctx.logger.error(`Genesis memory review failed. A storage or backup failure may follow a committed update; inspect storage before retrying. Otherwise check model and embedding configuration. ${statusFailure(error).message}`)
+        // Memory failures are reported separately; the completed chat reply remains successful.
       }
     }, { global: true })
   }
-  await ctx.plugin(GenesisStatusGateway, config)
-  const contexts = new Map<object, string>()
-  const refresh = async (agent: Agent, query: string) => {
-    const learned = config.awakening === undefined ? undefined : core.learningStatus().tools
-    await core.scan(agent.session.id, ctx.tools.schemas(agent)
-      .filter(tool => learned === undefined || tool.name === LEARN_TOOL || learned.includes(tool.name)))
-    contexts.set(agent, await selfContext(core, agent, query, config))
+  let emotion: LifeEmotionEngine | undefined
+  if (config.emotion !== undefined && config.memory !== undefined) {
+    const projection = emotionProjection(MAX_EMOTION_WINDOW_TURNS, config.memory.inputChars)
+    ctx.effect(() => ctx.sessionProjections.register(projection))
+    emotion = new LifeEmotionEngine(ctx, core, config.emotion, config.memory, () => models.read().models)
+    const engine = emotion
+    ctx.effect(() => () => engine.close())
+    ctx.on('agent/turn-stopping', async ({ agent, turn, signal }) => {
+      try { await engine.review(agent, turn, signal) } catch (error) {
+        ctx.logger.error(`Genesis emotion review failed. Model or validation failures retain the previous anchor. Storage or backup uncertainty stops dependent life operations and may follow a committed update; inspect storage before retrying. ${statusFailure(error).message}`)
+      }
+    }, { global: true })
   }
+  let interest: LifeInterestEngine | undefined
+  if (config.interest !== undefined && config.memory !== undefined) {
+    ctx.effect(() => ctx.sessionProjections.register(interestProjection(config.interest!.windowTurns, config.memory!.inputChars)))
+    interest = new LifeInterestEngine(ctx, core, config.interest, config.memory, () => models.read().models)
+    const engine = interest
+    ctx.effect(() => () => engine.close())
+    ctx.on('agent/turn-stopping', async ({ agent, turn, signal }) => {
+      try { await engine.review(agent, turn, signal) } catch (error) {
+        ctx.logger.error(`Genesis interest review failed; prior interests remain. Inspect model configuration or life storage before retrying. ${statusFailure(error).message}`)
+      }
+    }, { global: true })
+  }
+  if (consolidation !== undefined) {
+    ctx.effect(() => () => consolidation.close())
+    ctx.on('agent/status', ({ status }) => {
+      if (status === 'running') consolidation.activity()
+      else consolidation.kick()
+    }, { global: true })
+    consolidation.kick()
+  }
+  ctx.effect(() => ctx.sessionProjections.register(manualMemoryProjection))
+  await ctx.plugin(GenesisMemoryGateway, { memory, config, consolidation })
+  await ctx.plugin(GenesisAgencyGateway, { config, lifeMode })
+  await ctx.plugin(GenesisStatusGateway, { config, preferences, models, memory, emotion, interest, lifeMode })
+  const contexts = new Map<object, string>()
+  const associations = new Map<object, string>()
+  const refresh = async (agent: Agent, query: string) => {
+    await core.scan(agent.session.id, ctx.tools.schemas(agent))
+    const agency = await agencyContext(core, config)
+    contexts.set(agent, (await selfContext(core, agent, query, config, lifeMode(agent), associations.get(agent) ?? ''))
+      + (agency ? `\nCurrent life motivations and goals: ${agency}` : ''))
+  }
+  const replied = new Set<SessionId>()
   const userEvidence = new Map<SessionId, SessionEvent<'user/message'>>()
   const calls = new Map<SessionId, Map<string, string>>()
-  registerTools(ctx, core, config, id => userEvidence.get(id), memory)
+  registerTools(ctx, core, config, id => userEvidence.get(id), memory, lifeMode)
   if (config.awakening !== undefined) {
-    installLearning(ctx, core)
-    ctx.systemPrompt.section({ name: 'genesis:character', order: 0, text: LIFE_GUIDANCE, complete: true, interpolate: false })
+    installLearning(ctx, core, lifeMode)
   }
-  if (memory !== undefined && config.awakening === undefined) ctx.systemPrompt.section({ name: 'genesis:memory', order: 651, interpolate: false,
-    text: MEMORY_GUIDANCE })
-  ctx.systemPrompt.section({ name: 'genesis:guidance', order: 650, text: GUIDANCE, interpolate: false })
-  ctx.systemPrompt.context({ name: 'genesis:self', order: 130, interpolate: false,
+  if (memory !== undefined) ctx.systemPrompt.section({ name: 'genesis:memory', order: 651, interpolate: false,
+    text: `${MEMORY_GUIDANCE}\n${PARTICIPANT_GUIDANCE}` })
+  if (emotion !== undefined) ctx.systemPrompt.section({ name: 'genesis:emotion', order: 652, interpolate: false, text: EMOTION_GUIDANCE })
+  if (interest !== undefined) ctx.systemPrompt.section({ name: 'genesis:interest', order: 653, interpolate: false, text: INTEREST_GUIDANCE })
+  ctx.systemPrompt.section({ name: 'genesis:guidance', order: 650, text: GUIDANCE + (deliberation === undefined ? '' : `\n${DELIBERATION_GUIDANCE}`), interpolate: false })
+  ctx.systemPrompt.context({ name: 'genesis:self', order: 130, interpolate: false, required: true,
     text: ({ scope }) => scope === undefined ? '' : contexts.get(scope) ?? '' })
   ctx.on('agent/created', async ({ agent, source }) => {
     await core.bind(agent.session.id, source)
@@ -100,12 +213,16 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }, { global: true })
   ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
     const assembled = await next()
-    if (config.awakening !== undefined) {
+    if (lifeMode(context.agent)) {
+      assembled.sections = [{ name: 'genesis:character', text: `${LIFE_GUIDANCE}\n${PARTICIPANT_GUIDANCE}`
+        + (config.emotion === undefined ? '' : `\n${EMOTION_GUIDANCE}`)
+        + (config.interest === undefined ? '' : `\n${INTEREST_GUIDANCE}`)
+        + (deliberation === undefined ? '' : `\n${DELIBERATION_GUIDANCE}`), interpolate: false }]
       if (assembled.tools.some(tool => tool.name === 'run_code')) {
         throw new GenesisError('invalid-state', 'Awakening requires native tool presentation. Configure tools mode as native.')
       }
       const learned = core.learningStatus().tools
-      assembled.tools = assembled.tools.filter(tool => tool.name === LEARN_TOOL || learned.includes(tool.name))
+      assembled.tools = assembled.tools.filter(tool => tool.name === LEARN_TOOL || tool.name === RECALL_TOOL || learned.includes(tool.name))
       assembled.contexts = assembled.contexts.filter(section => section.name === 'genesis:self')
     }
     if (context.agent !== undefined) {
@@ -115,26 +232,56 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     }
     return assembled
   }, { global: true })
-  ctx.on('agent/pre-step', async ({ agent, messages }, next) => {
-    if (config.awakening !== undefined && !core.learningStatus().ready) {
+  ctx.on('agent/pre-step', async ({ agent, messages, signal }, next) => {
+    if (lifeMode(agent) && !core.learningStatus().ready) {
       throw new GenesisError('invalid-state', 'Complete API configuration or account sign-in, then name this life before chatting.')
     }
     const decision = await next()
-    if (config.awakening !== undefined && decision.kind === 'enter' && decision.messages.length > 0) {
+    if (lifeMode(agent) && decision.kind === 'enter' && decision.messages.length > 0) {
       await core.beginConversation(agent.session.id)
+    }
+    if (deliberation !== undefined && decision.kind === 'enter') {
+      decision.messages = await deliberation.admit(agent, decision.messages, signal)
+    }
+    const actualUsers = decision.kind === 'enter' ? decision.messages.filter(message => message.source.kind === 'user') : []
+    if (memory !== undefined && actualUsers.length > 0) {
+      const text = actualUsers.flatMap(message => message.content).filter(block => block.type === 'text').map(block => block.text).join(' ')
+      associations.set(agent, await memory.associate(text, signal))
     }
     await refresh(agent, (decision.kind === 'enter' ? decision.messages : messages).flatMap(message => message.content)
       .filter(block => block.type === 'text').map(block => block.text).join(' '))
     return decision
   }, { global: true })
   ctx.on('agent/disposed', ({ agent }) => {
+    if (deliberation !== undefined) void deliberation.settle(agent, true).catch((error) => {
+      ctx.logger.error(`Genesis decision settlement failed during disposal. Inspect life storage. ${statusFailure(error).message}`)
+    })
     memory?.forget(agent.session.id)
+    replied.delete(agent.session.id)
     contexts.delete(agent)
+    associations.delete(agent)
     userEvidence.delete(agent.session.id)
     calls.delete(agent.session.id)
   }, { global: true })
   ctx.on('session/event', (session, event) => {
+    deliberation?.observe(session.id, event)
+    if (deliberation !== undefined && event.type === 'turn/end' && event.data.reason.kind !== 'completed') {
+      const agent = ctx.agents.list().find(candidate => candidate.session.id === session.id)
+      if (agent !== undefined) void deliberation.settle(agent, true).catch((error) => {
+        ctx.logger.error(`Genesis decision settlement failed. Inspect life storage before retrying. ${statusFailure(error).message}`)
+      })
+    }
     memory?.observe(session.id, event)
+    if (event.type === 'user/message' && event.data.source.kind === 'user') consolidation?.activity()
+    if (event.type === 'turn/start') replied.delete(session.id)
+    if (event.type === 'assistant/message' && !event.data.interrupted
+      && event.data.message.content.some(block => block.type === 'text' && block.text.trim())) replied.add(session.id)
+    if (event.type === 'turn/end' && event.data.reason.kind === 'completed' && replied.has(session.id)
+      && core.learningStatus().firstSessionId === session.id && !core.learningStatus().firstConversationComplete) {
+      void core.completeFirstConversation(session.id, String(event.seq), new Date(event.time).toISOString()).catch(() => {
+        ctx.logger.error('First conversation completion could not be confirmed. Inspect Genesis storage before retrying initialization.')
+      })
+    }
     if (event.type === 'tool/call') {
       const pending = calls.get(session.id) ?? new Map<string, string>()
       pending.set(event.data.callId, event.data.name)

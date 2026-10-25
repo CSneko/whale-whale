@@ -27,7 +27,7 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-保存凭据或自定义提供方时保留已选模型。用户可在 composer 中选择可用模型。
+保存凭据或自定义提供方时保留已选模型。用户可在 composer 中选择可用模型。 API Key 引导编辑器提供“不再出现”，主机通过 `ui-settings-general.credentialOnboardingDismissed` 保存选择；刷新后仍关闭自动提醒，显式配置入口保留。
 
 提供方列表中 DeepSeek 账号排第一，DeepSeek 排第二；第三方提供方保留目录中的相对顺序。
 

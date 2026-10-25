@@ -21,6 +21,7 @@
  */
 
 import { isAbsolute } from 'node:path'
+import { realpathSync, statSync } from 'node:fs'
 import { Context, Service } from '@deepseek-ai/cordis'
 import { z as zod } from 'zod'
 import z from '@deepseek-ai/schemastery'
@@ -44,7 +45,7 @@ function renderPolicyContext(policy: SandboxExecutionPolicy): string {
     case 'read-only':
       return 'Current DSH file policy: read-only. Any available operation enforced by the DSH file sandbox cannot modify files in the standing mode. Do not refuse a required modification from this policy alone: try an available tool normally and follow any denial and escalation guidance it returns.'
     case 'workspace-write':
-      return `Current DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files under the session workspace: ${JSON.stringify(policy.workspaceRoot)}. Some platform temporary areas may also be writable.`
+      return `Current DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files under the session workspace: ${JSON.stringify(policy.workspaceRoot)}. Some platform temporary areas may also be writable.${policy.additionalWritableRoots?.length ? ` Additional operator-authorized writable directories: ${JSON.stringify(policy.additionalWritableRoots)}.` : ''}`
     case 'danger-full-access':
       return 'Current DSH file policy: danger-full-access. The DSH file sandbox does not restrict file modifications by available operations.'
     /* v8 ignore next 4 -- SandboxMode is a typed same-process closed union; this branch is only the static exhaustiveness guard. */
@@ -122,6 +123,7 @@ export class SandboxPolicyService extends Service {
   readonly defaultMode: SandboxMode
   /** The absolute `workspace-write` fallback root for calls without a session cwd. */
   readonly workspaceRoot: string
+  private readonly writableDirectories = new Map<symbol, { path: string; device: number; inode: number; enabled: () => boolean }>()
   constructor(ctx: Context, config: Config) {
     super(ctx, 'sandboxPolicy')
     // schemastery (static Config) already filled `mode`; the cast records that
@@ -163,11 +165,39 @@ export class SandboxPolicyService extends Service {
    */
   resolve(request: SandboxPolicyRequest = {}): SandboxExecutionPolicy {
     const { session } = request
+    const mode = request.mode ?? (session === undefined ? undefined : this.overrideOf(session)) ?? this.defaultMode
+    const additionalWritableRoots: string[] = []
+    if (mode === 'workspace-write') for (const directory of this.writableDirectories.values()) {
+      if (!directory.enabled()) continue
+      const current = statSync(directory.path)
+      if (!current.isDirectory() || realpathSync.native(directory.path) !== directory.path
+        || current.dev !== directory.device || current.ino !== directory.inode) {
+        throw new Error('sandbox-policy: an authorized writable directory was replaced; restart after verifying its contents')
+      }
+      additionalWritableRoots.push(directory.path)
+    }
     return {
-      mode: request.mode ?? (session === undefined ? undefined : this.overrideOf(session)) ?? this.defaultMode,
+      mode,
       workspaceRoot: resolveWorkspaceRoot(session?.header.cwd ?? this.workspaceRoot),
+      ...additionalWritableRoots.length === 0 ? {} : { additionalWritableRoots: [...new Set(additionalWritableRoots)] },
       ...session === undefined ? {} : { sessionId: session.id },
     }
+  }
+
+  /**
+   * Register one explicitly authorized host directory without widening read-only policy.
+   * @param path - Existing absolute directory; its canonical identity is pinned until disposal.
+   * @param enabled - Synchronous availability predicate, never authority from model or external data.
+   * @returns Disposer withdrawing this grant from future resolutions; already-confined processes retain launch-time permissions until exit. Callers register it through their own effect scope.
+   */
+  registerWritableDirectory(path: string, enabled: () => boolean): () => void {
+    resolveWorkspaceRoot(path)
+    const canonical = realpathSync.native(path)
+    const current = statSync(canonical)
+    if (!current.isDirectory()) throw new Error('sandbox-policy: writable directory must be a directory')
+    const key = Symbol()
+    this.writableDirectories.set(key, { path: canonical, device: current.dev, inode: current.ino, enabled })
+    return () => { this.writableDirectories.delete(key) }
   }
 
   /**

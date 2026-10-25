@@ -98,18 +98,20 @@ export type RpcMessage = ClientRequest | ServerResponse
 export interface ConnectionTrustRequest {
   /** Request headers supplied by either the Fetch or node:http representation. */
   readonly headers: Headers | Readonly<Record<string, string | readonly string[] | undefined>>
+  /** Facts supplied by the physical Node socket, never forwarded headers; absent in in-process Fetch calls. */
+  readonly socket?: { readonly remoteAddress?: string | undefined; readonly localAddress?: string | undefined }
 }
 
 /** HTTP status returned before dispatch, or undefined when the request may proceed. */
 export type ConnectionRequestRejection = 401 | 403 | undefined
 
-/** Root/index request facts used by the browser-token exchange. */
+/** Root/index request facts used by token exchange or browser key-form navigation. */
 export interface ConnectionIndexRequest extends ConnectionTrustRequest {
   readonly method?: string | undefined
   readonly url?: string | undefined
 }
 
-/** Root/index response operations owned by the browser-token exchange. */
+/** Root/index response operations owned by browser authentication. */
 export interface ConnectionIndexResponse {
   writeHead(status: number, headers?: Readonly<Record<string, string>>): unknown
   end(body?: string): unknown

@@ -90,6 +90,17 @@ describe('profile dialects', () => {
     expect(landlockProfileArgs(RO)).toEqual(['--ro', '/', '--rw', '/dev/null'])
   })
 
+  it('includes explicit additional roots in every POSIX profile only under workspace-write', () => {
+    const policy = { ...WW, additionalWritableRoots: ['/personal'] }
+    expect(bwrapProfileArgs(policy)).toEqual([...bwrapProfileArgs(WW), '--bind', '/personal', '/personal'])
+    expect(landlockProfileArgs(policy)).toEqual([...landlockProfileArgs(WW), '--rw', '/personal'])
+    expect(seatbeltProfileArgs(policy)[1]).toContain('(subpath "/personal")')
+    const readonly = { ...RO, additionalWritableRoots: ['/personal'] }
+    expect(bwrapProfileArgs(readonly)).toEqual(bwrapProfileArgs(RO))
+    expect(landlockProfileArgs(readonly)).toEqual(landlockProfileArgs(RO))
+    expect(seatbeltProfileArgs(readonly)).toEqual(seatbeltProfileArgs(RO))
+  })
+
   it('landlock workspace-write: adds the host /tmp and the workspace root', () => {
     expect(landlockProfileArgs(WW)).toEqual(['--ro', '/', '--rw', '/dev/null', '--rw', '/tmp', '--rw', '/ws'])
   })

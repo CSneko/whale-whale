@@ -33,7 +33,10 @@
         "@deepseek-ai/dsh-client-ui-settings",
         "@deepseek-ai/dsh-client-ui-layout",
         "@deepseek-ai/dsh-api-remotes",
-        "@deepseek-ai/dsh-client-resources"
+        "@deepseek-ai/dsh-client-resources",
+        "@deepseek-ai/dsh-client-ui-workspace",
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-client-ui-chat"
       ],
       "platform": "web"
     },
@@ -64,7 +67,12 @@
     "react-dom": "^18.2.0",
     "@deepseek-ai/dsh-experimental-genesis": "workspace:*",
     "@deepseek-ai/dsh-client-resources": "workspace:*",
-    "@deepseek-ai/dsh-typert-protocol": "workspace:*"
+    "@deepseek-ai/dsh-typert-protocol": "workspace:*",
+    "@deepseek-ai/dsh-client-ui-workspace": "workspace:*",
+    "@deepseek-ai/dsh-api-session-controller": "workspace:*",
+    "@deepseek-ai/dsh-client-ui-chat": "workspace:*",
+    "@deepseek-ai/dsh-brand": "workspace:*",
+    "@deepseek-ai/dsh-util-crypto": "workspace:*"
   },
   "files": [
     "lib/index.js",

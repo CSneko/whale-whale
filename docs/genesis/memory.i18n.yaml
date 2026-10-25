@@ -6,14 +6,35 @@
   en: 6e47f5f16465da82
   zh: 6c51f716540ee1e8
 /genesis-long-term-memory/enable:
-  en: 12306bcc81404abd
-  zh: ce016f945b35fa5d
+  en: 667c8454bfdee75d
+  zh: 3b1e40fdfe8cf4a8
+/genesis-long-term-memory/web-configuration:
+  en: c8b34a1d50a02d4c
+  zh: 0ab48023d2516c51
+/genesis-long-term-memory/participant-identity:
+  en: a261ea33f7d925f2
+  zh: 9a7e521941530796
+/genesis-long-term-memory/memory-time:
+  en: 65f6e4291523ebb2
+  zh: 5eada6c78937e167
 /genesis-long-term-memory/recall-and-updates:
-  en: b34d44e8ff6860b6
-  zh: cb78106abf00f52c
+  en: d1b06f4c0c7714da
+  zh: 2097f942d8dfee62
+/genesis-long-term-memory/experiences-previous-interpretations-and-association:
+  en: 7d8149a372898603
+  zh: 6ff2cbebc86d2d6c
+/genesis-long-term-memory/automatic-habits-and-idle-consolidation:
+  en: 330c5d21078cbcd4
+  zh: bbb73be7749c02c7
+/genesis-long-term-memory/selected-memory-organization:
+  en: 543819e25f92ff06
+  zh: f94309edec6016c5
+/genesis-long-term-memory/manual-memory-controls:
+  en: 287dde1a3bbf5db0
+  zh: e433f2ccb06f126b
 /genesis-long-term-memory/persistence-and-local-backup:
-  en: 53a21869180df0f0
-  zh: 319093745990e13e
+  en: aec325aabbab48c3
+  zh: d1de9b56f8220674
 /genesis-long-term-memory/verification-and-limits:
-  en: 960cd6a0953c9447
-  zh: d3d14af22af26c29
+  en: 314b2fb161144a23
+  zh: 3a650665c84be03c

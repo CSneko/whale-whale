@@ -27,7 +27,7 @@ Desktop product events use the optional [product analytics service](../product-a
 <a id="use-this-package"></a>
 ## Use this package
 
-Saving credentials or a custom provider preserves the selected model. The user can select an available model from the composer.
+Saving credentials or a custom provider preserves the selected model. The user can select an available model from the composer. The API-key onboarding editor offers Do not show again; the Host stores this choice in `ui-settings-general.credentialOnboardingDismissed`. Automatic reminders remain suppressed after reload, while explicit configuration stays available.
 
 DeepSeek Account appears first and DeepSeek second in the provider list; third-party providers retain their directory order.
 

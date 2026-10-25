@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for remote-access.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/genesis/remote-access.md
+/genesis-remote-browser-access:
+  en: 26ded2068ff114ed
+  zh: 08162c24a04c09f9
+/genesis-remote-browser-access/start-and-sign-in:
+  en: 13768de7c8449cc6
+  zh: d825bf8a9af45ac1
+/genesis-remote-browser-access/network-and-request-behavior:
+  en: 94f5a5158a172002
+  zh: dc3f6803a2637120
+/genesis-remote-browser-access/configuration-and-recovery:
+  en: 7c31e8131beec3ca
+  zh: 15da068a228aa105

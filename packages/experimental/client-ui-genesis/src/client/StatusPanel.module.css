@@ -38,8 +38,16 @@
 .notice { color: var(--dsw-alias-label-primary); }
 .loading { min-height: 96px; display: grid; place-items: center; }
 .naming { display: grid; gap: 12px; }
+.editor { display: grid; gap: 16px; }
+.actions { display: flex; gap: 12px; flex-wrap: wrap; }
+.search { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.search label { flex-basis: 100%; }
+.search > span { flex: 1; min-width: 0; }
 .dialog { width: min(520px, 100%); padding: 28px; overflow-y: auto; }
 @media (max-width: 480px) {
   .facts { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   .facts dd { margin-bottom: 8px; }
 }
+
+.modelFields { min-width: 0; margin: 0; padding: 16px; display: grid; gap: 12px; border: 1px solid var(--dsw-alias-line-tertiary); border-radius: 8px; }
+.modelFields legend { font-weight: 500; }

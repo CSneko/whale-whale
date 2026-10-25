@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.1-rc.2/genesis-affective-state-v2/guide.md
+/:
+  en: 31130683de669ea0
+  zh: 774ff0008e9bae7d
+/genesis-affect-state:
+  en: 6423363ce29b1601
+  zh: a0bd2796e27b65a5
+/genesis-affect-state/change:
+  en: b7bec5d3d8c5b152
+  zh: b8ea1f728153dcfe
+/genesis-affect-state/migration:
+  en: 5b1c6cb5913f6ee7
+  zh: 6e00118cbbdf9ebd

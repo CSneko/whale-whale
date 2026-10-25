@@ -53,6 +53,8 @@ interface SandboxExecutionPolicy {
   mode: SandboxMode
   /** Absolute root directory `workspace-write` may write under. */
   workspaceRoot: string
+  /** Additional operator-authorized host directories; effective only in workspace-write mode. */
+  additionalWritableRoots?: readonly string[]
   /**
    * Opaque identity of the calling session (the branded `dsh-session`
    * SessionId). Backends key per-session state off it (e.g. windows-acl gives
@@ -206,6 +208,14 @@ The sandbox-policy service (`ctx.sandboxPolicy`). Owns the deployment default mo
  * @returns the fully resolved per-call mode and absolute workspace root.
  */
 resolve(request: SandboxPolicyRequest = {}): SandboxExecutionPolicy
+
+/**
+ * Register one explicitly authorized host directory without widening read-only policy.
+ * @param path - Existing absolute directory; its canonical identity is pinned until disposal.
+ * @param enabled - Synchronous availability predicate, never authority from model or external data.
+ * @returns Disposer withdrawing this grant from future resolutions; already-confined processes retain launch-time permissions until exit. Callers register it through their own effect scope.
+ */
+registerWritableDirectory(path: string, enabled: () => boolean): () => void
 
 /**
  * Read the session override without applying the deployment default.

@@ -435,11 +435,13 @@ export type Config = LocalConfig
 ## `@deepseek-ai/dsh-client-connection`
 
 - `inject`: `credentials`
-- `source`: [`packages/client/connection/src/index.ts:96`](../packages/client/connection/src/index.ts)
+- `source`: [`packages/client/connection/src/index.ts:98`](../packages/client/connection/src/index.ts)
 
 ```ts config-catalog
 /** Browser authentication, request limits, and connection recovery configuration. */
 export interface ConnectionConfig {
+  /** Optional private key-file login bound to client IP and this process; absence retains the launch-token carrier. */
+  keyLogin?: KeyLoginConfig
   /** Browser recovery timing, injected into each served page. */
   recovery?: ConnectionRecoveryConfig
   /**
@@ -453,6 +455,20 @@ export interface ConnectionConfig {
   cookieMaxAgeDays?: number
   /** Maximum buffered JSON body for every `/api` request. Default: 300 MiB. */
   maxRequestBodyBytes?: number
+}
+
+/** Explicit file location and deployment rate limits for optional address-bound browser login. */
+export interface KeyLoginConfig {
+  /** Absolute private UTF-8 key file; created with a random key when absent. */
+  keyFile: string
+  /** Attempts accepted from one IP during one rate window. */
+  attemptsPerWindow: number
+  /** Rate window in milliseconds. */
+  windowMs: number
+  /** Maximum simultaneously tracked IPs; additional addresses receive 429. */
+  maxAddresses: number
+  /** Maximum time allowed to submit the complete small form. */
+  timeoutMs: number
 }
 
 /** Timing for generation readiness and automatic reconnection. */
@@ -1048,26 +1064,41 @@ export type Config = CuaConfig
 
 ## `@deepseek-ai/dsh-experimental-genesis`
 
-- `inject`: `storageDomain` · `tools` · `systemPrompt` · `agents` · `llm`
-- `source`: [`packages/experimental/genesis/src/config.ts:4`](../packages/experimental/genesis/src/config.ts)
+- `inject`: `storageDomain` · `tools` · `systemPrompt` · `agents` · `llm` · `sessionProjections` · `sandboxPolicy`
+- `refs`: `z` (`zod`)
+- `source`: [`packages/experimental/genesis/src/config.ts:5`](../packages/experimental/genesis/src/config.ts)
 
 ```ts config-catalog
 /** Validated, resolved Genesis plugin configuration. */
 export interface Config {
+  /** Calendar zone for memory anchors and relative recall; defaults to the host's IANA zone. */
+  timeZone: string
   /** Enables naming, newborn conversations and persistent tool learning on the configured chat route. */
   awakening?: {
     /** Registered chat provider checked before the naming step. */
     provider: string
     /** Chat model identifier on the configured provider. */
     model: string
+    /** Restrict newborn behavior to this preset; omitted preserves the legacy all-Session policy. */
+    lifePreset?: string
   } | undefined
   /** Local atomic backup; omitted resolves beside leasePath as leasePath + '.backup.json'. */
   backupPath?: string
+  /** Optional private, persistent host directory authorized across workspaces after read/write learning. */
+  personalDirectory?: string
+  /** Optional learned writing tool and operator record management; requires personalDirectory. */
+  records?: RecordsConfig | undefined
   /** Enables independent review/writing models and semantic memory search. */
   memory?: MemoryConfig | undefined
+  /** Optional life-wide emotion review, using the independent memory model routes without embeddings. */
+  emotion?: EmotionConfig | undefined
+  /** Optional experience-derived interests using the independent memory writer route. */
+  interest?: InterestConfig | undefined
+  /** Optional independent deliberation and persistent cross-Session life goals. */
+  deliberation?: DeliberationConfig | undefined
   /** Shared exclusive lease file for all processes accessing this life domain. */
   leasePath: string
-  /** Maximum retained facts, memories, growth records and scope entries; exhaustion refuses writes. */
+  /** Maximum retained facts, memories, previous versions, growth records and scope entries; exhaustion refuses writes. */
   maxRecords: number
   /** Maximum complete serialized snapshot characters. */
   maxStateChars: number
@@ -1081,12 +1112,42 @@ export interface Config {
   growthChars: number
   /** Complete model tool result budget, including wrappers. */
   resultChars: number
+  /** Complete model-catalog character budget, independent of inference output limits. */
+  modelCatalogChars: number
   /** Maximum records in a query response. */
   queryLimit: number
 }
 
+/** Storage and complete-response limits for independently authored writing records. */
+export interface RecordsConfig {
+  /** Maximum characters in a supplied title. */
+  titleChars: number
+  /** Maximum characters in one body; reads may span several chunks. */
+  contentChars: number
+  /** Maximum characters in an operator-supplied type name. */
+  typeChars: number
+  /** Maximum retained categories, including disabled categories. */
+  maxTypes: number
+  /** Maximum live records plus text-free creation receipts. */
+  maxRecords: number
+  /** Maximum serialized authoritative catalog characters. */
+  maxStateChars: number
+  /** Maximum serialized tool or search/read response characters, including metadata. */
+  resultChars: number
+  /** Maximum matches in one page. */
+  queryLimit: number
+  /** Maximum body excerpt characters in a search match. */
+  snippetChars: number
+}
+
 /** Explicit routes and budgets for the optional long-term memory pipeline. */
 export interface MemoryConfig {
+  /** TypeSafe-compatible /v1/systemone endpoint; absent uses the legacy provider route. */
+  decisionUrl?: string
+  /** Credential reference for Jev. */
+  decisionKeyEnv?: string
+  /** Minimum probability for a positive Jev decision. */
+  decisionThreshold?: number
   /** Registered Harness provider for the update/no-update decision. */
   decisionProvider: string
   /** Model identifier on the decision provider. */
@@ -1111,13 +1172,128 @@ export interface MemoryConfig {
   outputChars: number
   /** Output token limit for each decision or writer call. */
   maxTokens: number
+  /** Registered auxiliary calls: auto selects advertised off; provider-default inherits; other values require exact model support. */
+  reasoningEffort: string
+  /** Maximum complete records explicitly selected for one manual organization request. */
+  organizationLimit: number
+  /** Maximum current legacy records rewritten atomically when saving explicit operator identity. */
+  identityRewriteLimit: number
   /** Maximum changes in one atomic writer plan. */
   maxChanges: number
   /** Whole-life count limit for the small prompt-resident memory layer. */
   maxImplicitMemories: number
+  /** Maximum automatically associated memories per accepted user input; zero disables association. */
+  associationLimit: number
+  /** Complete JSON budget for automatic associated memories. */
+  associationChars: number
+  /** Maximum current-input characters used as an associative cue. */
+  associationInputChars: number
+  /** Maximum gap for offering a same-conversation experience for extension. */
+  experienceWindowMs: number
+  /** Quiet-memory maintenance limits; no chat replies or external actions are generated. */
+  consolidation: {
+    /** Deployment default; a saved operator preference takes precedence. */
+    enabled: boolean
+    /** Quiet interval after user activity or new evidence. */
+    idleMs: number
+    /** Minimum interval between successful automatic passes. */
+    cooldownMs: number
+    /** Minimum interval before retrying a failed pending revision. */
+    retryMs: number
+    /** Automatic failures allowed per evidence revision before manual intervention. */
+    maxFailures: number
+    /** Most recent complete memories considered per bounded pass. */
+    batchLimit: number
+    /** Independent completed user turns required for an inferred habit. */
+    minHabitSupport: number
+  }
   /** Minimum cosine similarity admitted into semantic recall results. */
   minSimilarity: number
 }
+
+/** Bounded post-reply emotion appraisal and deterministic recovery. */
+export interface EmotionConfig {
+  /** Shared emotion recovery and appraisal multiplier, including relationship learning; zero freezes automatic changes. */
+  sensitivity: number
+  /** Maximum related and self memories supplied to each appraisal. */
+  appraisalMemoryLimit: number
+  /** Serialized memory retrieval budget for each appraisal memory group. */
+  appraisalMemoryChars: number
+  /** Initial independent needs; subsequent changes come from sourced appraisals. */
+  initialNeeds: Needs
+  /** Slow loneliness adjustment half-life in milliseconds. */
+  needsHalfLifeMs: number
+  /** Half-life of recent contact evidence in milliseconds. */
+  interactionHalfLifeMs: number
+  /** Largest absolute need change per field and exchange. */
+  maxNeedsDelta: number
+  /** Enable learning for this deployment's single operator relationship; no name inference is performed. */
+  relationshipEnabled: boolean
+  /** Largest absolute relationship change per field and exchange before repetition discount. */
+  maxRelationshipDelta: number
+  /** Independent recent appraisals of the same meaning needed for an ordinary mood update. */
+  moodSupportTurns: number
+  /** Importance at which a sourced event may affect mood without repeated support. */
+  importantEventThreshold: number
+  /** Multiplier for each repeated appraisal meaning within the retained dialogue window. */
+  repetitionDiscount: number
+  /** Completed exchanges considered per review, including the current exchange. */
+  windowTurns: number
+  /** Initial mood and long-term recovery destination for each dimension. */
+  baseline: Mood
+  /** Per-field short reaction half-lives in milliseconds. */
+  shortHalfLifeMs: EmotionHalfLives
+  /** Per-field mood half-lives in milliseconds. */
+  moodHalfLifeMs: MoodHalfLives
+  /** Largest absolute immediate change allowed per field and exchange. */
+  maxDelta: number
+  /** Largest absolute mood change allowed per field and exchange. */
+  maxMoodDelta: number
+  /** Display resolution for recorded model context; smaller changes accumulate in durable state. */
+  contextStep: number
+}
+
+/** Bounds for one post-reply interest review and its model-visible summary. */
+export interface InterestConfig {
+  /** Recent completed exchanges retained for independent interest review. */
+  windowTurns: number
+  /** Maximum current topics in one life; reaching the limit rejects new topics. */
+  maxInterests: number
+  /** Distinct sourced exchanges required before a lasting preference can form. */
+  minEnduringTurns: number
+  /** Complete character budget for the logged current-interest summary. */
+  contextChars: number
+}
+
+/** Bounds for sourced deliberation; no background timer is installed. */
+export interface DeliberationConfig {
+  /** Persistent current motivation inventory limit. */
+  maxMotivations: number
+  /** Persistent goal inventory limit, including terminal goals. */
+  maxGoals: number
+  /** Maximum related memories supplied to a decision. */
+  memoryLimit: number
+  /** Complete serialized memory evidence budget. */
+  memoryChars: number
+  /** Complete logged agency context budget. */
+  contextChars: number
+  /** Half-life of current motivation strength in milliseconds. */
+  motivationHalfLifeMs: number
+  /** Largest strength revision per sourced deliberation. */
+  maxStrengthDelta: number
+}
+
+/** Persistent inclinations and fulfillment estimates; longing has its own immediate field. */
+export type Needs = z.infer<typeof needsSchema>
+
+/** Valence ranges from negative to positive; arousal measures activation. */
+export type Mood = z.infer<typeof moodSchema>
+
+/** Per-emotion decay durations. */
+export type EmotionHalfLives = z.infer<typeof emotionHalfLivesSchema>
+
+/** Mood recovery durations in milliseconds. */
+export type MoodHalfLives = z.infer<typeof moodHalfLivesSchema>
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-experimental-genesis -->
 
@@ -1735,11 +1911,12 @@ export interface Config {
    * for example the container's own Pod address from `hostname -i`. A loopback
    * literal (any address in 127/8, `::1`, or a mapped form of either) keeps the
    * server on this machine; any other literal serves the network that address
-   * belongs to, over plain HTTP unless `tls` is set. The unspecified address —
-   * IPv4 any, IPv6 any, and the IPv4-mapped forms of IPv4 any — is rejected at
-   * load: it would expose the port on every interface at once.
+   * belongs to, over plain HTTP unless `tls` is set. Unspecified addresses
+   * require explicit allowWildcardHost because they expose every interface.
    */
   host: string
+  /** Explicitly permit wildcard binding for deployments with configured authentication. Default: false. */
+  allowWildcardHost?: boolean
   /** Listen port; zero requests an OS-assigned port. */
   port: number
   /**
@@ -2753,7 +2930,7 @@ export interface Config {
 
 - `inject`: `sessionProjections`
 - `refs`: [`SandboxMode`](subsystems/sandbox.md)
-- `source`: [`packages/sandbox/sandbox-policy/src/index.ts:71`](../packages/sandbox/sandbox-policy/src/index.ts)
+- `source`: [`packages/sandbox/sandbox-policy/src/index.ts:72`](../packages/sandbox/sandbox-policy/src/index.ts)
 
 ```ts config-catalog
 /**

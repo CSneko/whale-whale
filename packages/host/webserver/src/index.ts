@@ -79,11 +79,12 @@ export interface Config {
    * for example the container's own Pod address from `hostname -i`. A loopback
    * literal (any address in 127/8, `::1`, or a mapped form of either) keeps the
    * server on this machine; any other literal serves the network that address
-   * belongs to, over plain HTTP unless `tls` is set. The unspecified address —
-   * IPv4 any, IPv6 any, and the IPv4-mapped forms of IPv4 any — is rejected at
-   * load: it would expose the port on every interface at once.
+   * belongs to, over plain HTTP unless `tls` is set. Unspecified addresses
+   * require explicit allowWildcardHost because they expose every interface.
    */
   host: string
+  /** Explicitly permit wildcard binding for deployments with configured authentication. Default: false. */
+  allowWildcardHost?: boolean
   /** Listen port; zero requests an OS-assigned port. */
   port: number
   /**
@@ -267,6 +268,24 @@ async function readTlsFile(field: 'certFile' | 'keyFile', path: string): Promise
   return content
 }
 
+const webServerConfig: z<Config> = z.object({
+  host: z.transform(z.string(), (value) => {
+    const parsed = parseIpLiteral(value)
+    if (parsed === undefined) throw notLiteralError(value)
+    return value
+  }).required(),
+  allowWildcardHost: z.boolean().default(false),
+  port: z.natural().max(65535).required(),
+  // An omitted object must not become `{}` and fail the required pair fields.
+  tls: z.object({
+    certFile: z.string().required(),
+    keyFile: z.string().required(),
+  }).default(undefined as never),
+  compression: z.union([z.const('none'), z.const('gzip')]).default(DEFAULT_COMPRESSION),
+  compressionLevel: z.number().step(1).min(0).max(9).default(DEFAULT_COMPRESSION_LEVEL),
+  compressionThresholdBytes: z.natural().default(DEFAULT_COMPRESSION_THRESHOLD_BYTES),
+})
+
 /**
  * The browser HTTP carrier service. Activation loads any configured TLS
  * material, then listens immediately; a material or listen failure rejects
@@ -276,24 +295,11 @@ async function readTlsFile(field: 'certFile' | 'keyFile', path: string): Promise
  * during startup with 404 until its owner registers.
  */
 export class WebServer extends Service {
-  static Config: z<Config> = z.object({
-    host: z.transform(z.string(), (value) => {
-      const parsed = parseIpLiteral(value)
-      if (parsed === undefined) throw notLiteralError(value)
-      if (isWildcardAddress(parsed)) {
-        throw new Error(`webserver: host ${JSON.stringify(value)} is an unspecified (wildcard) address, which is not supported: binding every interface would expose remote code execution to the network; bind one concrete IPv4 or IPv6 address of a local interface instead`)
-      }
-      return value
-    }).required(),
-    port: z.natural().max(65535).required(),
-    // An omitted object must not become `{}` and fail the required pair fields.
-    tls: z.object({
-      certFile: z.string().required(),
-      keyFile: z.string().required(),
-    }).default(undefined as never),
-    compression: z.union([z.const('none'), z.const('gzip')]).default(DEFAULT_COMPRESSION),
-    compressionLevel: z.number().step(1).min(0).max(9).default(DEFAULT_COMPRESSION_LEVEL),
-    compressionThresholdBytes: z.natural().default(DEFAULT_COMPRESSION_THRESHOLD_BYTES),
+  static Config: z<Config> = z.transform(webServerConfig, (config) => {
+    if (isWildcardHost(config.host) && !config.allowWildcardHost) {
+      throw new Error(`webserver: host ${JSON.stringify(config.host)} is an unspecified (wildcard) address, which is not supported without allowWildcardHost: configure authentication and opt in explicitly, or bind one concrete local interface`)
+    }
+    return config
   })
 
   private readonly exact = new Map<string, WebRoute>()
@@ -328,7 +334,7 @@ export class WebServer extends Service {
     return this.listenedPort
   }
 
-  /** The configured bind address (one concrete local interface). */
+  /** The configured bind address; wildcard values require explicit deployment opt-in. */
   get host(): Config['host'] {
     return this.config.host
   }

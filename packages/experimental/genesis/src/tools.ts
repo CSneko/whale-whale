@@ -1,12 +1,16 @@
 /** Native Genesis tools keep outputs in the normal durable tool pipeline. @module */
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { z } from 'zod'
 import type { Config } from './config.ts'
+import { agencyContext } from './deliberation.ts'
+import { emotionAt } from './emotion-state.ts'
 import { GenesisError } from './error.ts'
 import type { LifeCore } from './core.ts'
 import type { LifeMemoryEngine } from './memory.ts'
+import { readMemory } from './memory-time.ts'
 
 /**
  * Register query and explicitly sourced candidate-memory tools in the mounting scope.
@@ -15,9 +19,11 @@ import type { LifeMemoryEngine } from './memory.ts'
  * @param config - Complete output and retrieval bounds.
  * @param userEvidence - Latest actual user message observed since plugin activation.
  * @param memory - Optional semantic recall and independent post-turn writer.
+ * @param lifeMode - Whether the caller uses the character's learned-tool restriction.
  */
 export function registerTools(ctx: Context, core: LifeCore, config: Config,
-  userEvidence: (sessionId: SessionId) => SessionEvent<'user/message'> | undefined, memory?: LifeMemoryEngine): void {
+  userEvidence: (sessionId: SessionId) => SessionEvent<'user/message'> | undefined, memory: LifeMemoryEngine | undefined,
+  lifeMode: (agent: Agent | undefined) => boolean): void {
   const output = {
     schema: { type: 'json' } as const,
     render: (_args: unknown, value: z.core.util.JSONType) => [{ type: 'text' as const, text: JSON.stringify(value) }],
@@ -29,35 +35,43 @@ export function registerTools(ctx: Context, core: LifeCore, config: Config,
   }
   ctx.tools.register(defineTool({
     name: 'genesis_self',
-    description: 'Query the persistent life identity, actual Session tool availability, recent life events and system growth. Visibility is not authorization or proof of successful use.',
+    description: 'Query the persistent life identity, inferred interests, actual Session tool availability, recent life events and system growth. Visibility is not authorization or proof of successful use.',
     parameters: {}, output,
     async execute(_args, exec) {
       exec.signal.throwIfAborted()
       const agent = exec.agent
       if (agent === undefined) throw new GenesisError('invalid-source', 'Genesis requires a calling Agent.')
-      const learned = config.awakening === undefined ? undefined : core.learningStatus().tools
-      await core.scan(agent.session.id, ctx.tools.schemas(agent)
-        .filter(tool => learned === undefined || tool.name === 'learn' || learned.includes(tool.name)))
+      const learned = lifeMode(agent) ? core.learningStatus().tools : undefined
+      await core.scan(agent.session.id, ctx.tools.schemas(agent))
       const state = await core.snapshot()
       return bounded({ identity: state.identity,
+        ...(config.deliberation === undefined ? {} : { agency: z.json().parse(JSON.parse(await agencyContext(core, config))) }),
+        ...(config.emotion === undefined || state.emotion === undefined ? {} : { emotion: emotionAt(state.emotion, new Date().toISOString()) }),
+        ...(config.interest === undefined || state.interests === undefined ? {} : { interests: state.interests.slice(0, config.queryLimit)
+          .map(item => ({ id: item.id, topic: item.topic, stage: item.stage, reason: item.reason,
+            evidenceCount: item.evidence.length, sourceEventIds: item.evidence.at(-1)?.sourceEventIds ?? [] })) }),
         environment: { platform: process.platform, arch: process.arch, node: process.versions.node },
-        capabilities: state.sessions[agent.session.id] ?? [],
+        capabilities: (state.sessions[agent.session.id] ?? [])
+          .filter(tool => learned === undefined || tool.id === 'learn' || learned.includes(tool.id)),
         recentEvents: state.events.slice(-config.queryLimit), growth: state.growth.slice(-config.queryLimit),
-        limitations: ['No emotion, motivation, autonomous awakening or self-improvement system.',
-          'Installed/disabled plugins and package versions are unknown. Permission is checked at execution.'] })
+        limitations: [config.deliberation === undefined ? 'Deliberation is disabled; no autonomous goals are selected.'
+          : 'Deliberation manages life goals; independent wake scheduling and self-improvement are unavailable.',
+        'Installed/disabled plugins and package versions are unknown. Permission is checked at execution.'] })
     },
     presentCall: () => ({ card: 'generic', title: 'Genesis', kind: 'read' }),
   }))
   ctx.tools.register(defineTool({
     name: 'genesis_recall',
-    description: 'Search persistent sourced candidate memories across Sessions. Provide a meaningful nonempty query for semantic recall when the memory pipeline is enabled. Source event ids allow evidence inspection.',
+    description: 'Search persistent sourced candidate memories across Sessions. Actively recall by approximate topics, related words or partial keywords. With the memory pipeline enabled, semantic similarity can match different wording; an exact quotation is not required. A meaningful nonempty query is required. Results may include remembered experiences, linked knowledge and previous interpretations. Current content supersedes history; version timestamps describe recorded understanding. Source event ids allow evidence inspection.',
     parameters: { query: { type: 'string', required: true },
       category: { type: 'string', enum: ['episodic', 'semantic', 'self', 'procedural'] } }, output,
     async execute(args, exec) {
       exec.signal.throwIfAborted()
       const query = { text: args.query, ...(args.category === undefined ? {} : { category: args.category }),
         limit: config.queryLimit, chars: config.resultChars - 2 }
-      return bounded(await (memory === undefined ? core.retrieve(query) : memory.recall(query, exec.signal)))
+      const found = await (memory === undefined ? core.retrieve(query) : memory.recall(query, exec.signal))
+      const now = new Date()
+      return bounded(found.map(item => readMemory(item, now, config.timeZone)))
     },
     presentCall: args => ({ card: 'generic', title: 'Genesis', kind: 'search', rawInput: args.query }),
   }))
@@ -104,7 +118,7 @@ export function registerTools(ctx: Context, core: LifeCore, config: Config,
       exec.signal.throwIfAborted()
       const savedMemory = await core.remember({ content: args.content, category: args.category, importance: args.importance,
         confidence: args.confidence, sourceEventIds: [event.id] })
-      return bounded({ memory: savedMemory, status: 'candidate', source: { sessionId: agent.session.id, seq: source.seq } })
+      return bounded({ memory: readMemory(savedMemory, new Date(), config.timeZone), status: 'candidate', source: { sessionId: agent.session.id, seq: source.seq } })
     },
     presentCall: args => ({ card: 'generic', title: 'Genesis', kind: 'edit', rawInput: args.content }),
   }))

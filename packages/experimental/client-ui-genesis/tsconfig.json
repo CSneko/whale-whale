@@ -40,6 +40,21 @@
     },
     {
       "path": "../genesis"
+    },
+    {
+      "path": "../../client/ui-workspace"
+    },
+    {
+      "path": "../../api/session-controller/tsconfig.client.json"
+    },
+    {
+      "path": "../../client/ui-chat/tsconfig.client.json"
+    },
+    {
+      "path": "../../util/brand"
+    },
+    {
+      "path": "../../util/crypto"
     }
   ]
 }

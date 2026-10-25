@@ -58,6 +58,42 @@ function target(path: string): Promise<FsTarget> {
 }
 
 describe('the capability fact', () => {
+  it('grants only an explicitly registered personal directory across workspaces, preserves read-only, and withdraws future access on disposal', async () => {
+    await boot('workspace-write')
+    const personal = join(base, 'personal')
+    await mkdir(personal)
+    let learned = false
+    const dispose = ctx.sandboxPolicy.registerWritableDirectory(personal, () => learned)
+    try {
+      const file = join(personal, 'note.txt')
+      await expect(fs.writeText(await target(file), 'before learning')).rejects.toHaveProperty('code', 'FS_SANDBOX_DENIED')
+      learned = true
+      const first = ctx.sandboxPolicy.resolve()
+      await fs.writeText(await target(file), 'first', undefined, undefined, first)
+      await fs.writeText(await target(file), 'second', undefined, undefined, { ...ctx.sandboxPolicy.resolve(), workspaceRoot: outside })
+      expect(await readFile(file, 'utf8')).toBe('second')
+      await expect(fs.writeText(await target(join(base, 'unrelated.txt')), 'no')).rejects.toHaveProperty('code', 'FS_SANDBOX_DENIED')
+      await expect(fs.writeText(await target(file), 'no', undefined, undefined, { ...first, mode: 'read-only' })).rejects.toHaveProperty('code', 'FS_SANDBOX_DENIED')
+      dispose()
+      await expect(fs.writeText(await target(file), 'after disposal')).rejects.toHaveProperty('code', 'FS_SANDBOX_DENIED')
+      expect(await readFile(file, 'utf8')).toBe('second')
+    } finally { dispose() }
+  })
+
+  it.skipIf(process.platform === 'win32')('refuses symlink escape from an authorized personal directory and detects replacement of the directory itself', async () => {
+    await boot('workspace-write')
+    const personal = join(base, 'personal')
+    await mkdir(personal)
+    const dispose = ctx.sandboxPolicy.registerWritableDirectory(personal, () => true)
+    try {
+      await symlink(outside, join(personal, 'escape'), 'dir')
+      await expect(fs.writeText(await target(join(personal, 'escape', 'denied.txt')), 'no')).rejects.toHaveProperty('code', 'FS_SANDBOX_DENIED')
+      await rm(personal, { recursive: true })
+      await symlink(outside, personal, 'dir')
+      expect(() => ctx.sandboxPolicy.resolve()).toThrow('was replaced')
+    } finally { dispose() }
+  })
+
   it('reports the deployment default mode (what the tool layer advertises against)', async () => {
     await boot('workspace-write')
     expect(fs.sandboxMode).toBe('workspace-write')

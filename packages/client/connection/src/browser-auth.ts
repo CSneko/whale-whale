@@ -5,6 +5,9 @@ import type { PeerId } from '@deepseek-ai/dsh-typert-protocol'
 import { CONNECT_PATH, type ConnectionInteractions } from './connect-protocol.ts'
 import { credentialKey } from '@deepseek-ai/dsh-credentials'
 import type { CredentialProvider, CredentialRecord } from '@deepseek-ai/dsh-credentials'
+import type { IncomingMessage, ServerResponse } from 'node:http'
+import { KeyLogin, type KeyLoginConfig } from './key-login.ts'
+import { clientIp } from './socket-address.ts'
 import type {
   ConnectionIndexRequest,
   ConnectionIndexResponse,
@@ -37,8 +40,12 @@ interface ApiCookiePayload extends Omit<BrowserCookiePayload, 'version'> {
   readonly version: 2
   readonly id: PeerId
 }
+interface KeyCookiePayload extends Omit<BrowserCookiePayload, 'version'> {
+  readonly version: 3
+  readonly address: string
+}
 
-type CookiePayload = BrowserCookiePayload | ApiCookiePayload
+type CookiePayload = BrowserCookiePayload | ApiCookiePayload | KeyCookiePayload
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -151,7 +158,7 @@ function encodeCookie(payload: CookiePayload, secret: Buffer): string {
 function decodeCookie(value: string, secret: Buffer): CookiePayload | undefined {
   const parts = value.split('.')
   const [version, body, encodedSignature] = parts
-  if (parts.length !== 3 || (version !== 'v1' && version !== 'v2') || body === undefined || encodedSignature === undefined) {
+  if (parts.length !== 3 || (version !== 'v1' && version !== 'v2' && version !== 'v3') || body === undefined || encodedSignature === undefined) {
     return undefined
   }
   const actualSignature = decodeBase64Url(encodedSignature)
@@ -168,13 +175,15 @@ function decodeCookie(value: string, secret: Buffer): CookiePayload | undefined 
     return undefined
   }
   if (!isRecord(decoded)
-    || (decoded.version !== COOKIE_PAYLOAD_VERSION && decoded.version !== 2)
+    || (decoded.version !== COOKIE_PAYLOAD_VERSION && decoded.version !== 2 && decoded.version !== 3)
     || version !== `v${decoded.version}`
     || typeof decoded.authority !== 'string'
     || typeof decoded.issuedAt !== 'number' || !Number.isSafeInteger(decoded.issuedAt)
     || typeof decoded.expiresAt !== 'number' || !Number.isSafeInteger(decoded.expiresAt)) return undefined
   const payload = { authority: decoded.authority, issuedAt: decoded.issuedAt, expiresAt: decoded.expiresAt }
   if (decoded.version === COOKIE_PAYLOAD_VERSION) return { version: COOKIE_PAYLOAD_VERSION, ...payload }
+  if (decoded.version === 3) return typeof decoded.address === 'string' && decoded.address.length > 0
+    ? { version: 3, ...payload, address: decoded.address } : undefined
   if (typeof decoded.id !== 'string' || decoded.id.length === 0) return undefined
   return { version: 2, ...payload, id: decoded.id as PeerId }
 }
@@ -199,20 +208,22 @@ async function initializeSecret(credentials: CredentialProvider): Promise<Buffer
 }
 
 /**
- * Process launch-token exchange and persistent signed-cookie verification.
- * Connection loads the credential provider's signing secret during activation
- * and retains it for synchronous request authentication.
+ * Launch-token exchange or optional key-form login, with synchronous signed-cookie verification.
+ * Key-form cookies bind the physical peer IP and a signing key derived for this process.
  */
 export class BrowserAuth {
   private readonly launchToken: string
   private readonly maxAgeMilliseconds: number
+  private closing = false
 
   private constructor(
     processOwner: object,
     private readonly secret: Buffer,
     maxAgeDays: number,
+    private readonly keyLogin?: KeyLogin,
   ) {
     this.launchToken = processLaunchToken(processOwner)
+    if (keyLogin !== undefined) this.secret = createHmac('sha256', secret).update(`key-login-v1:${this.launchToken}`).digest()
     this.maxAgeMilliseconds = maxAgeDays * DAY_MILLISECONDS
     if (!Number.isSafeInteger(this.maxAgeMilliseconds)
       || !Number.isSafeInteger(Date.now() + this.maxAgeMilliseconds)) {
@@ -226,32 +237,38 @@ export class BrowserAuth {
    * @param processOwner - root application context retaining one token across Connection reloads.
    * @param credentials - persistent credential provider for the Web profile.
    * @param maxAgeDays - positive absolute browser-cookie lifetime in days.
+   * @param keyLogin - Optional private key-file login; absence retains launch-token exchange and persistent cookies.
    * @returns initialized authentication owner with the process owner's launch token.
    */
   static async create(
     processOwner: object,
     credentials: CredentialProvider,
     maxAgeDays: number,
+    keyLogin?: KeyLoginConfig,
   ): Promise<BrowserAuth> {
-    return new BrowserAuth(processOwner, await initializeSecret(credentials), maxAgeDays)
+    return new BrowserAuth(processOwner, await initializeSecret(credentials), maxAgeDays,
+      keyLogin === undefined ? undefined : await KeyLogin.create(keyLogin))
   }
+
+  /** Whether browser login requires the key form, with IP and process-scoped cookies. */
+  get keyLoginEnabled(): boolean { return this.keyLogin !== undefined }
 
   /**
    * Add this process's launch token to the caller's application URL.
    * @param baseUrl - clean browser URL whose authority and mount are preserved.
-   * @returns the same URL carrying the process token as its sole authentication input.
+   * @returns A clean URL in key-login mode, otherwise the URL carrying the process token.
    */
   authenticatedUrl(baseUrl: string): string {
     const url = new URL(baseUrl)
+    if (this.keyLogin !== undefined) { url.searchParams.delete(TOKEN_QUERY); return url.href }
     url.searchParams.set(TOKEN_QUERY, this.launchToken)
     return url.href
   }
 
   /**
-   * Authenticate an index request. A valid root query token mints the cookie
-   * and redirects to the directory-relative clean `./`; a valid cookie lets
-   * the caller serve the index; every other request receives the same minimal
-   * 401 response.
+   * Authenticate an index request. Key mode serves its form until an IP-bound cookie is valid.
+   * Legacy mode exchanges a root query token for a cookie and redirects to clean `./`;
+   * other unauthenticated legacy requests receive 401.
    * @param req - incoming root or configured-index request.
    * @param res - response owned when this method returns false.
    * @param secure - whether the listener receiving this request serves TLS; the
@@ -261,6 +278,11 @@ export class BrowserAuth {
    * @returns true only when the caller may serve index.html.
    */
   authorizeIndex(req: ConnectionIndexRequest, res: ConnectionIndexResponse, secure = false): boolean {
+    if (this.keyLogin !== undefined) {
+      if (this.isAuthenticated(req, secure)) return true
+      this.keyLogin.page(req, res, this.formToken(req, secure))
+      return false
+    }
     /* v8 ignore next -- node:http always supplies url on server requests. */
     const url = new URL(req.url ?? '/', 'http://dsh.invalid')
     const tokens = url.searchParams.getAll(TOKEN_QUERY)
@@ -317,6 +339,7 @@ export class BrowserAuth {
     secure: boolean,
     publish: (interactions: ConnectionInteractions) => PeerId,
   ): void {
+    if (this.keyLogin !== undefined) { this.writeUnauthorized(req, res); return }
     const url = new URL(req.url ?? '/', 'http://dsh.invalid')
     const declarations = url.searchParams.getAll('interactions')
     const interactions = declarations[0] ?? 'none'
@@ -354,7 +377,8 @@ export class BrowserAuth {
    * @returns true only for an unexpired cookie signed by this activation's loaded secret.
    */
   isAuthenticated(request: ConnectionTrustRequest, secure = false): boolean {
-    return this.authenticate(request, secure)?.version === COOKIE_PAYLOAD_VERSION
+    const version = this.authenticate(request, secure)?.version
+    return this.keyLogin === undefined ? version === COOKIE_PAYLOAD_VERSION : version === 3
   }
 
   /**
@@ -376,11 +400,46 @@ export class BrowserAuth {
     if (value === undefined) return undefined
     const payload = decodeCookie(value, this.secret)
     if (payload === undefined || payload.authority !== authority) return undefined
+    if (this.keyLogin !== undefined ? payload.version !== 3 || payload.address !== clientIp(request) : payload.version === 3) return undefined
     const now = Date.now()
     if (payload.issuedAt > now || payload.expiresAt <= now || payload.expiresAt <= payload.issuedAt
       || payload.expiresAt - payload.issuedAt > this.maxAgeMilliseconds) return undefined
     return payload
   }
+
+  private formToken(request: ConnectionTrustRequest, secure: boolean): string {
+    return encodeBase64Url(signature(this.secret, JSON.stringify(['login', requestAudience(request.headers, secure), clientIp(request)])))
+  }
+
+  /**
+   * Verify the browser key and publish an address-bound cookie only after success.
+   * @param req - Host/Origin-checked login request with physical socket facts.
+   * @param res - Response owned to completion.
+   * @param secure - Whether the receiving listener terminates TLS.
+   * @param report - Host-only safe operational diagnostics.
+   * @returns After verification or a complete failure response; accepted cookies expire at process restart.
+   */
+  async authorizeLogin(req: IncomingMessage, res: ServerResponse, secure: boolean, report: (error: unknown) => void): Promise<void> {
+    const login = this.keyLogin
+    const address = clientIp(req)
+    const authority = requestAudience(req.headers, secure)
+    if (login === undefined || address === undefined || authority === undefined) { this.writeUnauthorized(req, res); return }
+    const csrf = this.formToken(req, secure)
+    if (req.method === 'GET' || req.method === 'HEAD') { login.page(req, res, csrf, 'required', 200, true); return }
+    if (!await login.verify(req, res, csrf, report)) return
+    if (this.closing) { req.destroy(); return }
+    const issuedAt = Date.now(); const expiresAt = issuedAt + this.maxAgeMilliseconds
+    const value = encodeCookie({ version: 3, authority, address, issuedAt, expiresAt }, this.secret)
+    res.writeHead(303, { 'cache-control': 'no-store', 'location': '../', 'referrer-policy': 'no-referrer',
+      'set-cookie': sessionCookie(cookieName(authority), value, expiresAt, Math.floor(this.maxAgeMilliseconds / 1000), secure) })
+    res.end()
+  }
+
+  /**
+   * Cancel optional key-login requests before their owner is released.
+   * @returns After pending verifications drain; the Connection owner rejects new carrier requests first.
+   */
+  async close(): Promise<void> { this.closing = true; await this.keyLogin?.close() }
 
   private writeUnauthorized(req: ConnectionIndexRequest, res: ConnectionIndexResponse): void {
     res.writeHead(401, {

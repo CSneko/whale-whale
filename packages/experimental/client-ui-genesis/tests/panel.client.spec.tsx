@@ -49,3 +49,16 @@ it('shows a single loading state and an explicit unavailable state', () => {
   view.rerender(<StatusPanel {...fixture('none').props} />)
   expect(screen.getByText(en.unavailable)).toBeTruthy()
 })
+
+it('shows inferred interests with their stage and source without treating contact as a preference', () => {
+  const original = fixture('live', true).props
+  const status = statusFixture()
+  status.interest = { entries: [{ id: '72f7e6b7-5490-4d61-8da8-9ce536d632c1' as NonNullable<typeof status.interest>['entries'][number]['id'],
+    topic: 'watercolor painting', stage: 'contact', reason: 'She discussed a watercolor example.',
+    createdAt: status.sampledAt, updatedAt: status.sampledAt, evidenceCount: 1, sourceEventIds: [] }],
+  omitted: 0, history: [], historyOmitted: 0 }
+  render(<StatusPanel {...original} useResource={(() => ({ status: 'live', value: status, failure: undefined })) as typeof original.useResource} />)
+  expect(screen.getByText(`watercolor painting · ${zh['interestStage.contact']}`)).toBeTruthy()
+  expect(screen.queryByText(`watercolor painting · ${zh['interestStage.enduring']}`)).toBeNull()
+  expect(screen.getByText('She discussed a watercolor example.')).toBeTruthy()
+})

@@ -11,15 +11,24 @@
 - id: genesis
   config:
     leasePath: !!js dshHomePath('genesis.writer.lock')
+    personalDirectory: !!js dshHomePath('personal')
+    records: {}
+    emotion: {}
+    interest: {}
+    deliberation: {}
     awakening:
+      lifePreset: life
       provider: !!js process.env.GENESIS_CHAT_PROVIDER ?? 'deepseek-official'
       model: !!js process.env.GENESIS_CHAT_MODEL ?? 'deepseek-v4-flash'
     memory:
       decisionProvider: !!js process.env.GENESIS_DECISION_PROVIDER ?? process.env.GENESIS_CHAT_PROVIDER ?? 'deepseek-official'
-      decisionModel: !!js process.env.GENESIS_DECISION_MODEL ?? process.env.GENESIS_CHAT_MODEL ?? 'deepseek-v4-flash'
+      decisionUrl: !!js process.env.GENESIS_DECISION_URL ?? 'https://api.typesafe.ai/v1/systemone'
+      decisionKeyEnv: GENESIS_DECISION_API_KEY
+      decisionThreshold: 0.5
+      decisionModel: !!js process.env.GENESIS_DECISION_MODEL ?? 'jev-latest'
       writerProvider: !!js process.env.GENESIS_WRITER_PROVIDER ?? process.env.GENESIS_CHAT_PROVIDER ?? 'deepseek-official'
       writerModel: !!js process.env.GENESIS_WRITER_MODEL ?? process.env.GENESIS_CHAT_MODEL ?? 'deepseek-v4-flash'
       embeddingUrl: !!js process.env.GENESIS_EMBEDDING_URL
       embeddingModel: !!js process.env.GENESIS_EMBEDDING_MODEL
-      embeddingDimensions: !!js Number(process.env.GENESIS_EMBEDDING_DIMENSIONS)
+      embeddingDimensions: !!js Number(process.env.GENESIS_EMBEDDING_DIMENSIONS ?? 0)
       embeddingKeyEnv: GENESIS_EMBEDDING_API_KEY
