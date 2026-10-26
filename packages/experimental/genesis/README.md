@@ -143,6 +143,8 @@ Accepted changes replace the next logged runtime context. No background request 
 
 Logged context includes bounded motivations and unfinished life goals. Independent model inputs and outputs remain auxiliary audit records; the final choice enters conversation as a source-tagged notice. Fixed guidance is owned by [deliberation.ts](src/deliberation.ts).
 
+Auxiliary citation lists are derived from the final selected records, including retained goal, motivation and interest references. Whole optional records are omitted to fit the input budget and the twenty-event citation limit; the same lists govern commit validation. Goal `failures` is read-only execution feedback: a valid echoed count is discarded, and only observed failed execution increments the stored count. Other unexpected proposal fields and unselected evidence remain errors. Failed deliberation admits no task work and reports `GENESIS_DELIBERATION_FAILED` with a safe diagnostic; existing provider failure codes are preserved.
+
 #### Token effect
 
 Each ordinary user input or explicit event deliberation adds one independent writer call under the memory budgets. `deliberation.contextChars` bounds current state; the choice notice remains in conversation history.
@@ -201,3 +203,11 @@ Tool results append to logged conversation history. Enabling or disabling this p
 ### Dev Note
 
 None.
+
+### Social initiative
+
+When `socialInitiative` is enabled alongside memory and deliberation, one bounded timer and committed goal completion, a new autonomous goal or important memory change call the same speak-or-wait decision with current emotion, needs, interests, motivations and retrieved memory. `sessionId` selects one conversation; when omitted, the latest live conversation with actual user activity is used. The character has one choice per stable timer bucket or source event. Waiting creates no conversation. Speaking checks the quiet period, rolling daily limit, cooldown and queue before waking the ordinary Agent Loop. A generated internal notice is tagged as Genesis initiative input; only a committed assistant message is recorded as delivered.
+
+The life record keeps each opportunity, decision, reason, channel, message receipt and status. Missing channels leave opportunities pending. A reserved send whose Session receipt is absent or interrupted remains uncertain and is never automatically replayed; inspect its Session before any manual retry. Disabling the option stops future timers and delivery without deleting history or touching ordinary user turns.
+
+Each decision uses the existing independent deliberation writer, and an accepted message uses the normal conversation model once. Waiting does not call the conversation model. The assistant message enters the ordinary Session history and context budget. Proactive delivery executes no task tools.

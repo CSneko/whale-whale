@@ -1,6 +1,7 @@
 /** Validated Genesis durable records; independent of any model provider. @module */
 import { z } from 'zod'
 import { agencySchema } from './agency-state.ts'
+import { initiativeSchema } from './social-state.ts'
 import { appraisalSchema, appraisalEffectsSchema } from './relationship-state.ts'
 import { emotionStateSchema } from './emotion-state.ts'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
@@ -108,6 +109,7 @@ export const interestSchema = z.strictObject({
 export const stateSchema = z.strictObject({
   schemaVersion: z.literal(1), identity: identitySchema, emotion: emotionStateSchema.optional(), interests: z.array(interestSchema).optional(),
   agency: agencySchema.optional(),
+  initiative: initiativeSchema.optional(),
   operator: operatorIdentitySchema.extend({ revision: z.number().int().positive() }).optional(),
   suppressedHabitEvidence: z.array(eventId).optional(),
   events: z.array(eventSchema), memories: z.array(memorySchema), growth: z.array(growthSchema),
@@ -155,6 +157,14 @@ export const stateSchema = z.strictObject({
     if (!Array.isArray(sources) || sources.some(id => typeof id !== 'string' || !ids.has(id))) reject('Missing emotion source evidence')
   }
   const agency = state.agency
+  const interactions = state.initiative?.records ?? []
+  if (new Set(interactions.map(item => item.key)).size !== interactions.length
+    || new Set(interactions.map(item => item.id)).size !== interactions.length) reject('Duplicate initiative opportunity')
+  for (const item of interactions) {
+    if (!ids.has(item.sourceEventId) || (item.decisionId !== undefined
+      && !agency?.decisions.some(decision => decision.id === item.decisionId && decision.purpose === 'interaction'
+        && decision.sessionId === item.sessionId))) reject('Invalid initiative evidence or decision')
+  }
   const agencyBirths = state.events.filter(event => event.type === 'agency.initialized')
   if (agency === undefined ? agencyBirths.length > 0 : agencyBirths.length !== 1) reject('Agency state requires initialization evidence')
   if (agency !== undefined) {

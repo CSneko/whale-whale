@@ -76,6 +76,8 @@ it('pauses, resumes, advances and completes goals only through observed linked e
     input.plan.goals = [{ id: goal.id, content: goal.content, reason: goal.reason, origin: goal.origin,
       motivationIds: goal.motivationIds, memoryIds: [], sourceEventIds: input.sourceEventIds, priority: goal.priority,
       status, nextAction: `${key}: revise the review strategy.` }]
+    input.plan = deliberationPlanSchema.parse({ ...input.plan, goals: input.plan.goals.map(item => ({ ...item, failures: 999 })) })
+    expect(input.plan.goals[0]).not.toHaveProperty('failures')
     input.plan.candidates[0]!.disposition = status === 'active' ? 'accept' : 'wait'
     input.plan.candidates[0]!.goalIds = [goal.id]
     return opened.core.commitDeliberation(input)
@@ -100,12 +102,19 @@ it('pauses, resumes, advances and completes goals only through observed linked e
   expect(current.failures).toBe(1)
   expect((await opened.core.snapshot()).growth.some(item => item.title === 'Life goal completed')).toBe(true)
   await expect(change('reopen', 'active')).rejects.toThrow('Terminal goals')
+  await opened.close()
+  const restored = await openCore(opened.root, 'json', { deliberation: opened.config.deliberation })
+  disposers.push(() => restored.close())
+  expect((await restored.core.snapshot()).agency!.goals[0]).toEqual(current)
 })
 
 it('rejects completion text, stale revisions, invalid selections, arbitrary refusals and unknown event triggers', async () => {
   const opened = await fixture()
   const input = await commitInput(opened, 'validation')
   expect(deliberationPlanSchema.safeParse({ ...input.plan, goals: [{ ...input.plan.goals[0], status: 'completed' }] }).success).toBe(false)
+  expect(deliberationPlanSchema.safeParse({ ...input.plan, goals: [{ ...input.plan.goals[0], failures: -1 }] }).success).toBe(false)
+  expect(deliberationPlanSchema.safeParse({ ...input.plan, goals: [{ ...input.plan.goals[0], failures: '1' }] }).success).toBe(false)
+  expect(deliberationPlanSchema.safeParse({ ...input.plan, goals: [{ ...input.plan.goals[0], unexpected: true }] }).success).toBe(false)
   expect(deliberationPlanSchema.safeParse({ ...input.plan, selected: 5 }).success).toBe(false)
   await expect(opened.core.prepareDeliberation(SessionId('agency-session'), 'bad-trigger', 'event',
     brandString<LifeEventId>('00000000-0000-4000-8000-000000000000'))).rejects.toThrow('existing life event')

@@ -47,7 +47,8 @@ function genesisAuditRecord(event: SessionEvent) {
   return { ...record, data }
 }
 async function boot(root: string, enabled = true, memory?: MemoryConfig, awakening = false, credentials = false,
-  presets = false, persisted = false, emotion = false, personal = false, records?: Partial<RecordsConfig>, interest = false, deliberation = false) {
+  presets = false, persisted = false, emotion = false, personal = false, records?: Partial<RecordsConfig>, interest = false,
+  deliberation = false, social = false) {
   const configPath = join(root, 'cordis.yml')
   await writeFile(configPath, [
     ...(credentials ? ["- name: '@deepseek-ai/dsh-credentials-local'", '  config:',
@@ -71,6 +72,7 @@ async function boot(root: string, enabled = true, memory?: MemoryConfig, awakeni
     ...(emotion ? ['    emotion: {}'] : []),
     ...(interest ? ['    interest: {}'] : []),
     ...(deliberation ? ['    deliberation: {}'] : []),
+    ...(social ? ['    socialInitiative: { sessionId: social-test, intervalMs: 86400000, minSendIntervalMs: 0, maxPer24Hours: 1, userIdleMs: 0 }'] : []),
     ...(personal ? [`    personalDirectory: ${JSON.stringify(join(root, 'personal'))}`] : []),
     ...(records === undefined ? [] : [`    records: ${JSON.stringify(records)}`]),
     ...(memory === undefined ? [] : [`    memory: ${JSON.stringify(memory)}`]),
@@ -259,6 +261,219 @@ it('cancels deliberation before admission without task effects and withdraws its
   agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Run normally after unload.' }] }))
   await agent.whenIdle()
   expect(effects).toBe(1)
+})
+
+it('deliberation commits visible historical references and read-only failure echoes, but reports forged evidence without admitting work', async () => {
+  const root = await directory()
+  const { config } = await embeddingFixture()
+  config.associationLimit = 0
+  const ctx = await boot(root, true, config, false, false, false, true, false, false, undefined, true, true)
+  const sessionId = SessionId('deliberation-evidence')
+  const source = await ctx.genesis.observe({ sessionId, eventId: 'old-memory-source', kind: 'user-message',
+    timestamp: '2026-10-25T00:00:00.000Z' })
+  const memory = await ctx.genesis.remember({ category: 'self', content: 'A sourced inclination toward reviewing growth.',
+    importance: 1, confidence: 0.7, attribution: 'model-inference', sourceEventIds: [source.id] })
+  for (let turn = 1; turn <= 2; turn++) {
+    const existing = (await ctx.genesis.snapshot()).interests![0]
+    await ctx.genesis.reviewInterest(sessionId, { turn, startSeq: turn * 10, completed: true, overflow: false, tools: [], messages: [
+      { role: 'user', seq: turn * 10 + 1, timestamp: '2026-10-25T00:00:00.000Z', text: 'What changed in your tools?' },
+      { role: 'assistant', seq: turn * 10 + 2, timestamp: '2026-10-25T00:00:01.000Z', text: 'I would like to understand recorded growth.' },
+    ] }, [{ ...(existing === undefined ? {} : { id: existing.id }), topic: 'recorded growth', signal: turn === 1 ? 'contact' : 'curiosity', selfInitiated: false,
+      reason: 'A sourced question about actual growth.', sourceSeqs: [turn * 10 + 1, turn * 10 + 2] }])
+  }
+  const interest = (await ctx.genesis.snapshot()).interests![0]!
+  const historic = interest.evidence[0]!.sourceEventIds[0]!
+  // Age evidence out of the recent event window while keeping it in selected memories and interests.
+  for (let index = 0; index < 25; index++) await ctx.genesis.observe({ sessionId, eventId: `later-${index}`,
+    kind: 'assistant-message', timestamp: '2026-10-25T00:00:02.000Z' })
+  let forged = false
+  const factors = { motivation: 0.7, interest: 0.5, commitment: 0.6, emotion: 0.2, needs: 0.5,
+    benefit: 0.8, cost: 0.2, risk: 0.1, urgency: 0.4, relationship: 0.5, context: 0.8 }
+  class EvidenceWriter extends LlmAdapter {
+    override async resolveModel(provider: string, model: string) { return { provider, id: model, name: model } }
+    override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+      const input = z.object({ sourceEventIds: z.array(z.string()).max(20), memoryIds: z.array(z.string()),
+        interestIds: z.array(z.string()), goals: z.array(z.record(z.string(), z.unknown())) }).parse(JSON.parse(
+        options.messages.flatMap(message => message.content).filter(block => block.type === 'text').map(block => block.text).join('')))
+      expect(input.sourceEventIds).toContain(historic)
+      expect(input.sourceEventIds).toContain(source.id)
+      expect(input.memoryIds).toContain(memory.id)
+      expect(input.interestIds).toContain(interest.id)
+      const old = input.goals[0]
+      const goal = old === undefined ? { content: 'Review sourced growth', reason: 'Understand recorded experience.', origin: 'autonomous',
+        motivationIds: [], memoryIds: [memory.id], sourceEventIds: [historic, source.id], priority: 0.5,
+        status: 'active', nextAction: 'Read one growth record.' } : (() => {
+        const { createdAt: _createdAt, updatedAt: _updatedAt, ...proposal } = old
+        return proposal
+      })()
+      const response = JSON.stringify({ motivations: old === undefined || forged ? [{ content: 'Understand sourced growth',
+        reason: 'A sourced inclination.', strength: 0.7, status: 'active', interestIds: [interest.id], memoryIds: [memory.id],
+        sourceEventIds: forged ? [randomUUID()] : [historic, source.id] }] : [],
+      goals: forged ? [] : [{ ...goal, failures: 999 }],
+      candidates: [{ disposition: 'wait', action: 'Wait for another event.', reason: 'There is no urgent work.', factors,
+        goalIds: [], motivationIds: [] }], selected: 0, reason: 'Retain a sourced commitment without starting work.' })
+      yield { type: 'block-start', index: 0, blockType: 'text' }
+      yield { type: 'text-delta', index: 0, text: response }
+      yield { type: 'block-end', index: 0, block: { type: 'text', text: response } }
+      yield { type: 'finish', reason: { kind: 'stop' } }
+    }
+  }
+  ctx.llm.registerAdapter(['memory-writer'], new EvidenceWriter())
+  const chat = new ScriptedModel([])
+  ctx.llm.registerAdapter(['fixture'], chat)
+  const agent = await ctx.agentLoop.create(sessionId, { provider: 'fixture', model: 'chat' })
+  const signal = new AbortController().signal
+  const first = await ctx.genesisDeliberation.deliberate(agent, { key: 'historical', sourceEventId: source.id }, signal)
+  const second = await ctx.genesisDeliberation.deliberate(agent, { key: 'echo-goal', sourceEventId: source.id }, signal)
+  expect(first.sourceEventIds).toContain(historic)
+  expect(second.sourceEventIds).toContain(historic)
+  const before = await ctx.genesis.snapshot()
+  expect(before.agency!.goals[0]!.failures).toBe(0)
+  expect(before.agency!.goals[0]!.history).toHaveLength(2)
+  const requests = agent.session.ownEvents().map(genesisAuditRecord).filter(record => record?.data.role === 'deliberation-writer')
+  expect(requests).toHaveLength(2)
+  forged = true
+  agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Consider a new request.' }] }))
+  await agent.whenIdle()
+  const ending = agent.session.ownEvents().findLast(event => event.type === 'turn/end')
+  expect(ending).toMatchObject({ data: { reason: { kind: 'error', error: { code: 'GENESIS_DELIBERATION_FAILED',
+    message: expect.stringContaining('outside the selected context') } } } })
+  expect(chat.requests).toHaveLength(0)
+  expect((await ctx.genesis.snapshot()).agency).toEqual(before.agency)
+  await ctx.fiber.dispose()
+  const restored = await boot(root, true, config, false, false, false, true, false, false, undefined, true, true)
+  expect((await restored.genesis.snapshot()).agency).toEqual(before.agency)
+})
+
+it.each([24000, 2400])('deliberation omits whole over-budget evidence records and commits only the final citation lists (%i chars)', async (inputChars) => {
+  const root = await directory()
+  const { config } = await embeddingFixture()
+  config.inputChars = inputChars
+  config.associationLimit = 0
+  const ctx = await boot(root, true, config, false, false, false, false, false, false, undefined, false, true)
+  const sessionId = SessionId('deliberation-bounds')
+  const sources = []
+  for (let index = 0; index < 24; index++) sources.push(await ctx.genesis.observe({ sessionId, eventId: `source-${index}`,
+    kind: 'assistant-message', timestamp: '2026-10-25T00:00:00.000Z' }))
+  const memory = await ctx.genesis.remember({ category: 'semantic', content: 'A memory with more than twenty supporting events.',
+    importance: 1, confidence: 0.7, sourceEventIds: sources.map(item => item.id) })
+  let selected: string[] = []
+  class BoundedWriter extends LlmAdapter {
+    override async resolveModel(provider: string, model: string) { return { provider, id: model, name: model } }
+    override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+      const raw = options.messages.flatMap(message => message.content).filter(block => block.type === 'text').map(block => block.text).join('')
+      expect(raw.length).toBeLessThanOrEqual(inputChars)
+      const input = z.object({ triggerEventId: z.string(), sourceEventIds: z.array(z.string()).max(20), memoryIds: z.array(z.string()),
+        memories: z.array(z.object({ id: z.string() })), personalityEvidence: z.array(z.object({ sourceEventIds: z.array(z.string()) })),
+        recentEvents: z.array(z.object({ id: z.string() })) }).parse(JSON.parse(raw))
+      selected = input.sourceEventIds
+      expect(selected[0]).toBe(input.triggerEventId)
+      expect(input.memories).toEqual([])
+      expect(input.memoryIds).not.toContain(memory.id)
+      expect(new Set(selected)).toEqual(new Set([input.triggerEventId, sources[0]!.id, ...input.recentEvents.map(item => item.id),
+        ...input.personalityEvidence.flatMap(item => item.sourceEventIds)]))
+      const response = JSON.stringify({ motivations: [], goals: [], candidates: [{ disposition: 'wait', action: 'Wait.', reason: 'No work needed.',
+        factors: { motivation: 0, interest: 0, commitment: 0, emotion: 0, needs: 0, benefit: 0, cost: 0, risk: 0, urgency: 0, relationship: 0, context: 0 },
+        goalIds: [], motivationIds: [] }], selected: 0, reason: 'Wait for another event.' })
+      yield { type: 'block-start', index: 0, blockType: 'text' }
+      yield { type: 'text-delta', index: 0, text: response }
+      yield { type: 'block-end', index: 0, block: { type: 'text', text: response } }
+      yield { type: 'finish', reason: { kind: 'stop' } }
+    }
+  }
+  ctx.llm.registerAdapter(['memory-writer'], new BoundedWriter())
+  const agent = await ctx.agentLoop.create(sessionId, { provider: 'fixture', model: 'chat' })
+  const choice = await ctx.genesisDeliberation.deliberate(agent, { key: 'bounded', sourceEventId: sources[0]!.id }, new AbortController().signal)
+  expect(choice.sourceEventIds).toEqual(selected)
+  expect(choice.outcome.status).toBe('waiting')
+})
+
+it('delivers one proactive choice as an assistant message, honors silence, and restores the committed receipt without replay', async () => {
+  const root = await directory()
+  const { config } = await embeddingFixture()
+  config.associationLimit = 0
+  const first = await boot(root, true, config, false, false, false, true, true, false, undefined, false, true, true)
+  const factors = { motivation: 0.8, interest: 0.5, commitment: 0.2, emotion: 0.6, needs: 0.8,
+    benefit: 0.7, cost: 0.1, risk: 0.1, urgency: 0.2, relationship: 0.8, context: 0.7 }
+  class SocialWriter extends LlmAdapter {
+    decisions = ['wait', 'accept', 'accept']
+    decisionCount = 0
+    override async resolveModel(provider: string, model: string) { return { provider, id: model, name: model } }
+    override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+      const prompt = options.system ?? ''
+      const socialDecision = prompt.includes('ONLY whether to initiate a conversation')
+      if (socialDecision) this.decisionCount++
+      const disposition = socialDecision ? this.decisions.shift() ?? 'wait' : 'wait'
+      const response = JSON.stringify({ motivations: [], goals: [], candidates: [{ disposition,
+        action: 'Share a thought from the current conversation.', reason: 'I have a grounded thought worth sharing.', factors,
+        goalIds: [], motivationIds: [] }], selected: 0, reason: 'I would like to share one grounded thought.' })
+      yield { type: 'block-start', index: 0, blockType: 'text' }
+      yield { type: 'text-delta', index: 0, text: response }
+      yield { type: 'block-end', index: 0, block: { type: 'text', text: response } }
+      yield { type: 'finish', reason: { kind: 'stop' } }
+    }
+  }
+  const writer = new SocialWriter()
+  first.llm.registerAdapter(['memory-writer'], writer)
+  const chat = new ScriptedModel(['Ordinary reply.', 'A thought I wanted to share.'])
+  first.llm.registerAdapter(['fixture'], chat)
+  const sessionId = SessionId('social-test')
+  const agent = await first.agentLoop.create(sessionId, { provider: 'fixture', model: 'chat' })
+  agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Hello.' }] }))
+  await agent.whenIdle()
+  const source = await first.genesis.observe({ sessionId, eventId: 'eligible-social-event', kind: 'user-message', timestamp: new Date().toISOString() })
+  const quiet = await first.genesisInitiative.considerInteraction({ key: 'quiet-choice', sourceEventId: source.id })
+  expect(quiet.status).toBe('skipped')
+  expect(chat.requests).toHaveLength(1)
+  const sent = await first.genesisInitiative.considerInteraction({ key: 'speak-choice', sourceEventId: source.id })
+  expect(sent.status).toBe('dispatching')
+  await agent.whenIdle()
+  await first.genesisInitiative.resume()
+  const committed = (await first.genesis.snapshot()).initiative!.records.find(item => item.key === 'speak-choice')!
+  expect(committed).toMatchObject({ status: 'sent', message: 'A thought I wanted to share.', sessionId, reason: expect.any(String) })
+  const socialInput = agent.session.ownEvents().find(event => event.type === 'user/message'
+    && event.data.source.kind === 'genesis-initiative')
+  expect(socialInput?.type).toBe('user/message')
+  expect(agent.session.ownEvents().filter(event => event.type === 'user/message' && event.data.source.kind === 'user')).toHaveLength(1)
+  const receipts = agent.session.ownEvents().filter(event => event.type === 'assistant/message')
+  expect(receipts).toHaveLength(2)
+  expect(receipts.at(-1)?.type === 'assistant/message'
+    && receipts.at(-1)?.data.message.content).toContainEqual({ type: 'text', text: 'A thought I wanted to share.' })
+  expect(first.genesis.permitsDecision(committed.decisionId!)).toBe(false)
+  const limited = await first.genesisInitiative.considerInteraction({ key: 'daily-limit', sourceEventId: source.id })
+  expect(limited.status).toBe('pending')
+  expect(limited.note).toContain('Rolling proactive message limit reached')
+  expect(chat.requests).toHaveLength(2)
+  await first.genesis.remember({ category: 'semantic', content: 'A significant new finding.', importance: 0.95,
+    confidence: 0.9, sourceEventIds: [source.id] })
+  for (let attempt = 0; attempt < 20 && writer.decisionCount < 4; attempt++) await new Promise(resolve => setTimeout(resolve, 5))
+  expect(writer.decisionCount).toBe(4)
+  expect((await first.genesis.snapshot()).initiative!.records.some(item => item.key.startsWith('event:') && item.status === 'pending')).toBe(true)
+  await first.genesisInitiative.tick()
+  expect(writer.decisionCount).toBe(5)
+  expect((await first.genesis.snapshot()).initiative!.records.some(item => item.key.startsWith('timer:'))).toBe(true)
+  await first.fiber.dispose()
+
+  const second = await boot(root, true, config, false, false, false, true, true, false, undefined, false, true, true)
+  const restored = await second.genesisInitiative.considerInteraction({ key: 'speak-choice', sourceEventId: source.id })
+  expect(restored.status).toBe('sent')
+  expect(chat.requests).toHaveLength(2)
+  expect((await second.genesis.snapshot()).initiative!.records.find(item => item.key === 'speak-choice')!.status).toBe('sent')
+})
+
+it('keeps a proactive choice pending when no idle Harness conversation can receive it', async () => {
+  const root = await directory()
+  const { config } = await embeddingFixture()
+  config.associationLimit = 0
+  const ctx = await boot(root, true, config, false, false, false, true, false, false, undefined, false, true, true)
+  const writer = new ScriptedModel([])
+  ctx.llm.registerAdapter(['memory-writer'], writer)
+  const source = await ctx.genesis.observe({ sessionId: SessionId('missing-social-channel'), eventId: 'offline-social-event', kind: 'user-message', timestamp: new Date().toISOString() })
+  const result = await ctx.genesisInitiative.considerInteraction({ key: 'offline-choice', sourceEventId: source.id })
+  expect(result.status).toBe('pending')
+  expect(result.note).toContain('No idle character conversation channel')
+  expect(writer.requests).toHaveLength(0)
+  expect((await ctx.genesis.snapshot()).initiative!.records.find(item => item.key === 'offline-choice')!.status).toBe('pending')
 })
 
 it('loads interest review through Cordis, logs the formed contact and restores it in another Session', async () => {
