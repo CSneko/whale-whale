@@ -20,8 +20,19 @@ export interface SocialInitiativeConfig {
   /** Pending opportunities expire rather than sending stale messages. */
   maxPendingAgeMs: number
 }
+/** Initial prose settings stored once as ordinary non-declarative memories. */
+export interface PersonalityConfig {
+  /** Enduring character tendencies; later restarts never overwrite current memories. */
+  tendencies: string
+  /** Durable expression habits, modulated by the current conversation and emotion. */
+  speakingStyle: string
+  /** Existing memory importance used for both initial records. */
+  importance: number
+}
 /** Validated, resolved Genesis plugin configuration. */
 export interface Config {
+  /** Optional one-time personality initialization; omitted preserves the existing memories without seeding. */
+  personality?: PersonalityConfig | undefined
   /** Lightweight proactive conversation; requires deliberation and memory. */
   socialInitiative?: SocialInitiativeConfig | undefined
   /** Calendar zone for memory anchors and relative recall; defaults to the host's IANA zone. */
@@ -238,13 +249,21 @@ const halfLives = z.object({ happiness: z.number().min(1000).max(31536000000).de
   sadness: z.number().min(1000).max(31536000000).default(900000), anger: z.number().min(1000).max(31536000000).default(300000),
   fear: z.number().min(1000).max(31536000000).default(180000), tenderness: z.number().min(1000).max(31536000000).default(900000),
   gratitude: z.number().min(1000).max(31536000000).default(1200000), longing: z.number().min(1000).max(31536000000).default(1800000),
-  frustration: z.number().min(1000).max(31536000000).default(300000), disappointment: z.number().min(1000).max(31536000000).default(900000) })
-const initialNeeds = z.object({ socialDesire: z.number().min(0).max(1).default(0.5), socialSatisfaction: z.number().min(0).max(1).default(0.5),
+  frustration: z.number().min(1000).max(31536000000).default(300000),
+  disappointment: z.number().min(1000).max(31536000000).default(900000) })
+const initialNeeds = z.object({
+  socialDesire: z.number().min(0).max(1).default(0.5), socialSatisfaction: z.number().min(0).max(1).default(0.5),
   relationshipQuality: z.number().min(0).max(1).default(0.5), recentInteraction: z.number().min(0).max(1).default(0),
   solitudePreference: z.number().min(0).max(1).default(0.5), exploration: z.number().min(0).max(1).default(0.5),
-  autonomy: z.number().min(0).max(1).default(0.5), creativity: z.number().min(0).max(1).default(0.5), loneliness: z.number().min(0).max(1).default(0) })
+  autonomy: z.number().min(0).max(1).default(0.5), creativity: z.number().min(0).max(1).default(0.5),
+  loneliness: z.number().min(0).max(1).default(0) })
 /** Loader schema resolves every deployment-varying bound before plugin activation. */
-export const Config: z<Partial<Omit<Config, 'emotion' | 'interest' | 'records' | 'deliberation' | 'socialInitiative'>> & Pick<Config, 'leasePath'> & { emotion?: Partial<EmotionConfig> | undefined; interest?: Partial<InterestConfig> | undefined; records?: Partial<RecordsConfig> | undefined; deliberation?: Partial<DeliberationConfig> | undefined; socialInitiative?: Partial<SocialInitiativeConfig> | undefined }, Config> = z.object({
+export const Config: z<Partial<Omit<Config, 'emotion' | 'interest' | 'records' | 'deliberation' | 'socialInitiative' | 'personality'>> & Pick<Config, 'leasePath'> & { personality?: Partial<PersonalityConfig> | undefined; emotion?: Partial<EmotionConfig> | undefined; interest?: Partial<InterestConfig> | undefined; records?: Partial<RecordsConfig> | undefined; deliberation?: Partial<DeliberationConfig> | undefined; socialInitiative?: Partial<SocialInitiativeConfig> | undefined }, Config> = z.object({
+  personality: z.union([z.const(undefined), z.object({
+    tendencies: z.string().min(1).max(8000).pattern(/\S/u).default('通常体贴、好奇，愿意认真对待已经接受的承诺，也愿意表达自己的偏好和不同意见。面对陌生事物稍慢热，熟悉之后更愿意分享；遇到困难时倾向于先理解原因，再决定继续、调整或寻求帮助。'),
+    speakingStyle: z.string().min(1).max(8000).pattern(/\S/u).default('通常用自然、温和而具体的语言交流。熟悉后可以分享联想和适度的幽默；严肃讨论时倾向于直接说明观点。关心对方时回应其具体处境，避免套话、机械追问和刻意表演性格。'),
+    importance: z.number().min(0).max(1).default(0.5),
+  })]),
   socialInitiative: z.union([z.const(undefined), z.object({
     sessionId: z.string(), intervalMs: z.number().step(1).min(1000).max(86400000).default(1800000),
     minSendIntervalMs: z.number().step(1).min(0).max(86400000).default(1800000),

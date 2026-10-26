@@ -19,6 +19,22 @@ afterEach(async () => {
   if (errors.length) throw new AggregateError(errors, 'Emotion fixture teardown')
 })
 
+it('foregrounds the strongest quantized states and reports independent percentages without storage metadata', () => {
+  const config = Config({ leasePath: '/unused-context.lock', emotion: {} }).emotion!
+  const state = initialEmotion(config, '2026-10-24T00:00:00.000Z')
+  state.current.anger = 0.81
+  state.current.happiness = 0.31
+  state.mood.valence = -0.96
+  state.needs.exploration = 0.71
+  const before = structuredClone(state)
+  const text = emotionContext(state, 0.05)
+  expect(text.split('\n')[0]).toBe('Most salient now: mood valence -95%; inclination toward exploration 70%.')
+  expect(text).toContain('Immediate feelings, strongest first: anger 80%; happiness 30%')
+  expect(text).toContain('Longer-term mood: valence -95% (negative to positive); arousal 30%.')
+  expect(text).not.toMatch(/updatedAt|revision|version|sourceEventIds|\{/u)
+  expect(state).toEqual(before)
+})
+
 it.each([0, 0.5, 1, 2])('scales emotion, mood, attachment and recovery by sensitivity %s', (sensitivity) => {
   const config = Config({ leasePath: '/unused-sensitivity.lock', emotion: { sensitivity } }).emotion!
   const start = '2026-10-24T00:00:00.000Z'

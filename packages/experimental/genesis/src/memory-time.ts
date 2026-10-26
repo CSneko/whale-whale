@@ -7,11 +7,15 @@ const markers = /\{\{((?:time|date):[^{}]+)\}\}/gu
 
 
 /** Calendar precision belongs to the evidence; unknown dates must not acquire invented days. */
-export const MEMORY_TIME_GUIDANCE = 'Distinguish dates worth remembering exactly from ordinary experience time. Use {{date:YYYY-MM-DD}} for explicitly evidenced birthdays, anniversaries, appointments, deadlines or an explicit request to remember an exact date. Use {{date:--MM-DD}} for an annual birthday or anniversary when no year is known; never invent a birth year. Exact date anchors remain precise during recall. For ordinary experiences, use {{time:YYYY-MM-DD}}, {{time:YYYY-Www}} (ISO Monday week), {{time:YYYY-MM}} or {{time:YYYY}}; recall renders these relatively. Other supported calendar precisions may also use date anchors when exact retention is justified. Preserve the precision supported by evidence, existing exact dates and event tense during synthesis. Do not make ordinary event dates exact merely because a storage timestamp is available. Never store deictic dates such as today, yesterday, last week, 今年 or 明年 outside anchors. Resolve them relative to the timestamp of the cited message in clock.timeZone, not the time of this model call or memory update. Storage timestamps do not establish when the described event happened. Determine time expressions from the entire sentence. Substrings in ordinary words such as 明年 in 说明年龄 are not dates; preserve those words, model names and version numbers unchanged. If evidence cannot date an event, explicitly say its time is unknown; never guess. Keep an explicitly stated time of day beside the date anchor. A summary of the supplied interaction may use its actual source-message date.'
+export const MEMORY_TIME_GUIDANCE = '区分需要精确保留的日期与普通经历时间。有明确证据的生日、纪念日、预约、截止日期，或用户明确要求记住的准确日期，使用 {{date:YYYY-MM-DD}}。已知每年重复但年份未知的生日或纪念日使用 {{date:--MM-DD}}；不得编造出生年份。回忆时必须保留精确日期标记。普通经历使用 {{time:YYYY-MM-DD}}、{{time:YYYY-Www}}（ISO 周一为一周起点）、{{time:YYYY-MM}} 或 {{time:YYYY}}；回忆时会转换为相对时间。只有证据支持精确保留时，才使用其他受支持精度的日期标记。整理时保留证据支持的精度、已有准确日期和事件时态。不得仅因存在存储时间戳，就把普通事件日期写成精确日期。不得在标记之外保存“今天”“昨天”“上周”“今年”“明年”等相对日期。应根据被引用消息的时间和 clock.timeZone 解析这些日期，而不是依据本次模型调用或记忆更新时间。存储时间戳不能证明所述事件发生的时间。应结合整句判断时间表达；例如“说明年龄”中的“明年”不是日期，应原样保留普通词语、模型名称和版本号。如果证据无法确定日期，应明确写明时间未知，不得猜测。若明确提到具体时刻，应将其保留在日期标记旁。所提供交流的摘要可使用其来源消息的实际日期。'
 
 function dateKey(now: Date, timeZone: string): string {
   const parts = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now)
-  return ['year', 'month', 'day'].map(type => parts.find(part => part.type === type)!.value).join('-')
+  return ['year', 'month', 'day'].map((type) => {
+    const part = parts.find(candidate => candidate.type === type)
+    if (part === undefined) throw new GenesisError('invalid-state', `Calendar formatter omitted ${type}.`)
+    return part.value
+  }).join('-')
 }
 function dateNumber(value: string): number { return Date.parse(`${value}T00:00:00.000Z`) / DAY }
 function dayKey(value: number): string { return new Date(value * DAY).toISOString().slice(0, 10) }
@@ -87,18 +91,18 @@ export function relativeMemoryTime(value: string, now: Date, timeZone: string): 
   if (parsed === undefined) return '时间无法读取'
   const today = dateNumber(dateKey(now, timeZone)), age = today - parsed.first
   if (parsed.precision === 'day') {
-    if (age >= -2 && age <= 2) return ['后天', '明天', '今天', '昨天', '前天'][age + 2]!
+    if (age >= -2 && age <= 2) return ['后天', '明天', '今天', '昨天', '前天'][age + 2] ?? '时间无法读取'
   }
   if (parsed.precision === 'day' || parsed.precision === 'week') {
     const weeks = (monday(today) - monday(parsed.first)) / 7
-    if (weeks >= -1 && weeks <= 1) return ['下周', '这周', '上周'][weeks + 1]!
+    if (weeks >= -1 && weeks <= 1) return ['下周', '这周', '上周'][weeks + 1] ?? '时间无法读取'
     if (parsed.precision === 'week' && weeks === 2) return '两周前'
   }
   const current = new Date(today * DAY), past = new Date(parsed.first * DAY)
   const years = current.getUTCFullYear() - past.getUTCFullYear()
   if (parsed.precision !== 'year') {
     const months = years * 12 + current.getUTCMonth() - past.getUTCMonth()
-    if (months >= -1 && months <= 1) return ['下个月', '这个月', '上个月'][months + 1]!
+    if (months >= -1 && months <= 1) return ['下个月', '这个月', '上个月'][months + 1] ?? '时间无法读取'
     if (months > 1 && months < 12) return months === 6 ? '半年前' : `${months}个月前`
     if (months < -1 && months > -12) return `${-months}个月后`
   }
@@ -112,7 +116,7 @@ export function relativeMemoryTime(value: string, now: Date, timeZone: string): 
  * @param timeZone - Deployment calendar zone.
  * @returns Serializable reading without embeddings; date anchors remain exact, time anchors and record timestamps become relative.
  */
-export function readMemory(memory: LifeMemory, now: Date, timeZone: string): object {
+export function readMemory(memory: LifeMemory, now: Date, timeZone: string): Omit<LifeMemory, 'embedding'> {
   const prose = (text: string) => text.split(markers).map((part, index) => index % 2 === 1
     ? part.startsWith('date:') ? exactDate(part.slice(5)) : relativeMemoryTime(part.slice(5), now, timeZone)
     : part).join('')
@@ -122,8 +126,30 @@ export function readMemory(memory: LifeMemory, now: Date, timeZone: string): obj
   return { ...view, content: prose(memory.content), createdAt: timestamp(memory.createdAt), updatedAt: timestamp(memory.updatedAt),
     ...(memory.habit === undefined ? {} : { habit: habit(memory.habit) }),
     ...(memory.experience === undefined ? {} : { experience: { ...memory.experience,
-      startedAt: timestamp(memory.experience.startedAt), endedAt: timestamp(memory.experience.endedAt), topics: memory.experience.topics.map(prose) } }),
+      startedAt: timestamp(memory.experience.startedAt), endedAt: timestamp(memory.experience.endedAt),
+      topics: memory.experience.topics.map(prose) } }),
     ...(memory.history === undefined ? {} : { history: memory.history.map(version => ({ ...version,
       content: prose(version.content), recordedAt: timestamp(version.recordedAt), supersededAt: timestamp(version.supersededAt),
       ...(version.habit === undefined ? {} : { habit: habit(version.habit) }) })) }) }
+}
+
+/**
+ * Render current memory content for automatic context without storage identifiers or revision history.
+ * @param memory - Sourced memory selected by the caller; this function does not select records.
+ * @param now - Shared retrieval instant.
+ * @param timeZone - Calendar zone for dates embedded in remembered content.
+ * @returns Attributed candidate content and optional habit cue/response; detailed evidence stays retrievable.
+ */
+export function memoryCue(memory: LifeMemory, now: Date, timeZone: string): {
+  content: string
+  attribution: string
+  confidence: string
+  habit?: { cue: string; response: string }
+  previousInterpretations?: boolean
+} {
+  const reading = readMemory(memory, now, timeZone)
+  return { content: reading.content, attribution: memory.attribution ?? 'unspecified',
+    confidence: `${Math.round(memory.confidence * 100)}%`,
+    ...(reading.habit === undefined ? {} : { habit: { cue: reading.habit.cue, response: reading.habit.response } }),
+    ...(memory.history?.length ? { previousInterpretations: true } : {}) }
 }

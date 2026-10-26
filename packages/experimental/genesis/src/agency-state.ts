@@ -23,15 +23,18 @@ const factors = z.strictObject({ motivation: unit, interest: unit, commitment: u
   needs: unit, benefit: unit, cost: unit, risk: unit, urgency: unit, relationship: unit, context: unit })
 const goalStatus = z.enum(['active', 'paused', 'completed', 'abandoned'])
 const disposition = z.enum(['accept', 'negotiate', 'defer', 'decline', 'clarify', 'wait'])
-/** Untrusted proposals discard read-only failure echoes; completion and permission changes remain forbidden. */
+const proposalTimes = { createdAt: time.optional(), updatedAt: time.optional() }
+/** Untrusted proposals discard valid read-only timestamp and failure echoes; completion and permission changes remain forbidden. */
 export const deliberationPlanSchema = z.strictObject({
   motivations: z.array(z.strictObject({ id: motivationId.optional(), content: text, reason: text, strength: unit,
-    status: z.enum(['active', 'paused', 'ended']), interestIds: interestRefs, memoryIds: memoryRefs, sourceEventIds: eventRefs.min(1) })).max(4),
+    status: z.enum(['active', 'paused', 'ended']), interestIds: interestRefs, memoryIds: memoryRefs, sourceEventIds: eventRefs.min(1),
+    ...proposalTimes,
+  }).transform(({ createdAt: _createdAt, updatedAt: _updatedAt, ...proposal }) => proposal)).max(4),
   goals: z.array(z.strictObject({ id: goalId.optional(), content: text, reason: text,
     origin: z.enum(['autonomous', 'user', 'event']), motivationIds: z.array(motivationId).max(20),
     memoryIds: memoryRefs, sourceEventIds: eventRefs.min(1), priority: unit, status: z.enum(['active', 'paused', 'abandoned']),
-    nextAction: text, failures: z.number().int().nonnegative().optional(),
-  }).transform(({ failures: _failures, ...proposal }) => proposal)).max(4),
+    nextAction: text, failures: z.number().int().nonnegative().optional(), ...proposalTimes,
+  }).transform(({ failures: _failures, createdAt: _createdAt, updatedAt: _updatedAt, ...proposal }) => proposal)).max(4),
   candidates: z.array(z.strictObject({ disposition, action: text, reason: text, factors,
     goalIds: z.array(goalId).max(20), motivationIds: z.array(motivationId).max(20) })).min(1).max(6),
   selected: z.number().int().min(0).max(5), reason: text,

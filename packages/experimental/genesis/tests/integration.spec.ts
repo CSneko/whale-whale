@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { randomUUID } from 'node:crypto'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { readBackup } from '../src/backup.ts'
 import { manifestSchema } from '../src/storage-layout.ts'
@@ -18,9 +18,10 @@ import { joinState } from '../src/storage-state.ts'
 import { ScriptedModel } from './adapter.ts'
 import * as Genesis from '../src/index.ts'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
-import type { MemoryConfig, RecordsConfig } from '../src/config.ts'
+import type { MemoryConfig, RecordsConfig, PersonalityConfig } from '../src/config.ts'
 import type { WritingRead } from '../src/records-model.ts'
 import { brandString } from '@deepseek-ai/dsh-brand'
+import type { LifeEvent } from '../src/model.ts'
 import type { MemoryId, MemoryOrganizationId, MemoryOrganizationRequest } from '../src/status-types.ts'
 import { createServer } from 'node:http'
 import { LlmAdapter, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
@@ -48,7 +49,7 @@ function genesisAuditRecord(event: SessionEvent) {
 }
 async function boot(root: string, enabled = true, memory?: MemoryConfig, awakening = false, credentials = false,
   presets = false, persisted = false, emotion = false, personal = false, records?: Partial<RecordsConfig>, interest = false,
-  deliberation = false, social = false) {
+  deliberation = false, social = false, personality?: Partial<PersonalityConfig>) {
   const configPath = join(root, 'cordis.yml')
   await writeFile(configPath, [
     ...(credentials ? ["- name: '@deepseek-ai/dsh-credentials-local'", '  config:',
@@ -70,6 +71,7 @@ async function boot(root: string, enabled = true, memory?: MemoryConfig, awakeni
         `  config: { id: ${id}, plugins: ${id === 'life' ? "[{ name: '@deepseek-ai/dsh-time-context' }]" : '[]'} }`])] : []),
     "- name: '@deepseek-ai/dsh-experimental-genesis'", `  disabled: ${!enabled}`, '  config:', `    leasePath: ${JSON.stringify(join(root, 'writer.lock'))}`,
     ...(emotion ? ['    emotion: {}'] : []),
+    ...(personality === undefined ? [] : [`    personality: ${JSON.stringify(personality)}`]),
     ...(interest ? ['    interest: {}'] : []),
     ...(deliberation ? ['    deliberation: {}'] : []),
     ...(social ? ['    socialInitiative: { sessionId: social-test, intervalMs: 86400000, minSendIntervalMs: 0, maxPer24Hours: 1, userIdleMs: 0 }'] : []),
@@ -114,7 +116,8 @@ it('deliberation enforces refusal at execution, reconsiders new information and 
         const current = review.data.conversation.at(-1)!
         const response = JSON.stringify({ changes: current.messages.some(item => item.role === 'user') ? [] : [{
           topic: 'capability review', signal: 'exploration', selfInitiated: false, reason: 'An autonomous review actually ran.',
-          sourceSeqs: [...current.messages.map(item => item.seq), ...current.tools.flatMap(item => item.resultSeq === undefined ? [] : [item.resultSeq])],
+          sourceSeqs: [...current.messages.map(item => item.seq),
+            ...current.tools.flatMap(item => item.resultSeq === undefined ? [] : [item.resultSeq])],
         }] })
         yield { type: 'block-start', index: 0, blockType: 'text' }
         yield { type: 'text-delta', index: 0, text: response }
@@ -186,6 +189,13 @@ it('deliberation enforces refusal at execution, reconsiders new information and 
   expect(saved.agency!.decisions.map(item => item.candidates[item.selected]!.disposition)).toEqual(['wait', 'defer', 'accept'])
   expect(saved.agency!.decisions.at(-1)!.outcome.status).toBe('succeeded')
   expect(JSON.stringify(chat.requests)).toContain('Recorded Genesis choice')
+  const agencyText = chat.requests[0]!.messages.flatMap(message => message.content)
+    .filter(block => block.type === 'text').map(block => block.text)
+    .find(text => text.includes('Current life motivations and goals: '))!.split('Current life motivations and goals: ')[1]!
+  expect(agencyText).toContain('Review one capability change')
+  expect(agencyText).toContain('%')
+  expect(agencyText).not.toContain(saved.agency!.goals[0]!.id)
+  expect(agencyText).not.toMatch(/sourceEventIds|revision|updatedAt/u)
   expect(JSON.stringify(agent.session.ownEvents())).toContain('genesis-deliberation')
   expect(agent.session.ownEvents().map(genesisAuditRecord).some(record => record?.type === 'plugin:genesis/memory-call'
     && z.object({ phase: z.literal('request'), role: z.literal('deliberation-writer') }).safeParse(record.data).success)).toBe(true)
@@ -222,13 +232,13 @@ it('cancels deliberation before admission without task effects and withdraws its
   const { config } = await embeddingFixture()
   config.associationLimit = 0
   const ctx = await boot(root, true, config, false, false, false, false, false, false, undefined, false, true)
-  const entered = Promise.withResolvers<void>()
+  const entered = Promise.withResolvers<undefined>()
   class CancellableWriter extends LlmAdapter {
     override async resolveModel(provider: string, model: string) { return { provider, id: model, name: model } }
     override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
       const signal = options.signal
       if (signal === undefined) throw new Error('The auxiliary writer requires cancellation.')
-      entered.resolve()
+      entered.resolve(undefined)
       await new Promise<void>((resolve) => {
         if (signal.aborted) resolve()
         else signal.addEventListener('abort', () => resolve(), { once: true })
@@ -263,7 +273,7 @@ it('cancels deliberation before admission without task effects and withdraws its
   expect(effects).toBe(1)
 })
 
-it('deliberation commits visible historical references and read-only failure echoes, but reports forged evidence without admitting work', async () => {
+it('deliberation commits visible historical references and discards read-only metadata echoes, but reports forged evidence without admitting work', async () => {
   const root = await directory()
   const { config } = await embeddingFixture()
   config.associationLimit = 0
@@ -302,14 +312,12 @@ it('deliberation commits visible historical references and read-only failure ech
       const old = input.goals[0]
       const goal = old === undefined ? { content: 'Review sourced growth', reason: 'Understand recorded experience.', origin: 'autonomous',
         motivationIds: [], memoryIds: [memory.id], sourceEventIds: [historic, source.id], priority: 0.5,
-        status: 'active', nextAction: 'Read one growth record.' } : (() => {
-        const { createdAt: _createdAt, updatedAt: _updatedAt, ...proposal } = old
-        return proposal
-      })()
+        status: 'active', nextAction: 'Read one growth record.' } : old
       const response = JSON.stringify({ motivations: old === undefined || forged ? [{ content: 'Understand sourced growth',
         reason: 'A sourced inclination.', strength: 0.7, status: 'active', interestIds: [interest.id], memoryIds: [memory.id],
-        sourceEventIds: forged ? [randomUUID()] : [historic, source.id] }] : [],
-      goals: forged ? [] : [{ ...goal, failures: 999 }],
+        sourceEventIds: forged ? [randomUUID()] : [historic, source.id],
+        createdAt: '2000-01-01T00:00:00.000Z', updatedAt: '2000-01-01T00:00:00.000Z' }] : [],
+      goals: forged ? [] : [{ ...goal, failures: 999, createdAt: '2000-01-01T00:00:00.000Z', updatedAt: '2000-01-01T00:00:00.000Z' }],
       candidates: [{ disposition: 'wait', action: 'Wait for another event.', reason: 'There is no urgent work.', factors,
         goalIds: [], motivationIds: [] }], selected: 0, reason: 'Retain a sourced commitment without starting work.' })
       yield { type: 'block-start', index: 0, blockType: 'text' }
@@ -330,6 +338,10 @@ it('deliberation commits visible historical references and read-only failure ech
   const before = await ctx.genesis.snapshot()
   expect(before.agency!.goals[0]!.failures).toBe(0)
   expect(before.agency!.goals[0]!.history).toHaveLength(2)
+  for (const item of [...before.agency!.motivations, ...before.agency!.goals]) {
+    expect(item.createdAt).not.toBe('2000-01-01T00:00:00.000Z')
+    expect(item.updatedAt).not.toBe('2000-01-01T00:00:00.000Z')
+  }
   const requests = agent.session.ownEvents().map(genesisAuditRecord).filter(record => record?.data.role === 'deliberation-writer')
   expect(requests).toHaveLength(2)
   forged = true
@@ -345,6 +357,75 @@ it('deliberation commits visible historical references and read-only failure ech
   expect((await restored.genesis.snapshot()).agency).toEqual(before.agency)
 })
 
+it('omits deleted memory references from deliberation commitments', async () => {
+  const root = await directory()
+  const { config } = await embeddingFixture()
+  config.associationLimit = 0
+  const ctx = await boot(root, true, config, false, false, false, true, false, false, undefined, false, true)
+  const sessionId = SessionId('deliberation-removed-memory')
+  const source = await ctx.genesis.observe({ sessionId, eventId: 'removed-memory-source', kind: 'user-message',
+    timestamp: '2026-10-25T00:00:00.000Z' })
+  const memory = await ctx.genesis.remember({ category: 'self', content: 'A sourced inclination to review growth.',
+    importance: 1, confidence: 0.7, attribution: 'model-inference', sourceEventIds: [source.id] })
+  const inputs: Array<{
+    sourceEventIds: string[]
+    memoryIds: string[]
+    motivations: Array<{
+      id?: string | undefined
+      content: string
+      reason: string
+      strength: number
+      status: 'active' | 'paused' | 'ended'
+      interestIds: string[]
+      memoryIds: string[]
+      sourceEventIds: string[]
+      currentStrength?: number | undefined
+    }>
+  }> = []
+  const factors = { motivation: 0.5, interest: 0.5, commitment: 0.5, emotion: 0.5, needs: 0.5, benefit: 0.5,
+    cost: 0.5, risk: 0.5, urgency: 0.5, relationship: 0.5, context: 0.5 }
+  class StaleReferenceWriter extends LlmAdapter {
+    override async resolveModel(provider: string, model: string) { return { provider, id: model, name: model } }
+    override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+      const raw = options.messages.flatMap(message => message.content).filter(block => block.type === 'text')
+        .map(block => block.text).join('')
+      const input = z.object({ sourceEventIds: z.array(z.string()), memoryIds: z.array(z.string()),
+        motivations: z.array(z.object({ id: z.string().optional(), content: z.string(), reason: z.string(), strength: z.number(),
+          status: z.enum(['active', 'paused', 'ended']), interestIds: z.array(z.string()), memoryIds: z.array(z.string()),
+          sourceEventIds: z.array(z.string()), currentStrength: z.number().optional() })) }).parse(JSON.parse(raw))
+      inputs.push(input)
+      const existing = input.motivations[0]
+      const motivations = existing === undefined ? [{ content: 'Review recorded growth.', reason: 'A sourced inclination.',
+        strength: 0.7, status: 'active' as const, interestIds: [], memoryIds: [memory.id],
+        sourceEventIds: input.sourceEventIds.slice(0, 2) }] : [{ id: existing.id, content: existing.content, reason: existing.reason,
+        strength: existing.strength, status: existing.status, interestIds: existing.interestIds, memoryIds: existing.memoryIds,
+        sourceEventIds: input.sourceEventIds.slice(0, 2) }]
+      const response = JSON.stringify({ motivations, goals: [], candidates: [{ disposition: 'wait', action: 'Wait for more evidence.',
+        reason: 'No urgent external action is needed.', factors, goalIds: [], motivationIds: [] }], selected: 0,
+      reason: 'Wait for a relevant opportunity.' })
+      yield { type: 'block-start', index: 0, blockType: 'text' }
+      yield { type: 'text-delta', index: 0, text: response }
+      yield { type: 'block-end', index: 0, block: { type: 'text', text: response } }
+      yield { type: 'finish', reason: { kind: 'stop' } }
+    }
+  }
+  ctx.llm.registerAdapter(['memory-writer'], new StaleReferenceWriter())
+  ctx.llm.registerAdapter(['fixture'], new ScriptedModel([]))
+  const agent = await ctx.agentLoop.create(sessionId, { provider: 'fixture', model: 'chat' })
+  const signal = new AbortController().signal
+  await ctx.genesisDeliberation.deliberate(agent, { key: 'with-memory', sourceEventId: source.id }, signal)
+  expect(inputs[0]!.memoryIds).toContain(memory.id)
+  expect(await ctx.genesis.deleteMemory(memory.id)).toBe(true)
+  const next = await ctx.genesis.observe({ sessionId, eventId: 'after-memory-deletion', kind: 'user-message',
+    timestamp: '2026-10-25T00:00:01.000Z' })
+  await expect(ctx.genesisDeliberation.deliberate(agent, { key: 'without-memory', sourceEventId: next.id }, signal)).resolves.toMatchObject({
+    candidates: [{ disposition: 'wait' }],
+  })
+  expect(inputs[1]!.memoryIds).not.toContain(memory.id)
+  expect(inputs[1]!.motivations[0]!.memoryIds).toEqual([])
+  await ctx.fiber.dispose()
+})
+
 it.each([24000, 2400])('deliberation omits whole over-budget evidence records and commits only the final citation lists (%i chars)', async (inputChars) => {
   const root = await directory()
   const { config } = await embeddingFixture()
@@ -352,7 +433,7 @@ it.each([24000, 2400])('deliberation omits whole over-budget evidence records an
   config.associationLimit = 0
   const ctx = await boot(root, true, config, false, false, false, false, false, false, undefined, false, true)
   const sessionId = SessionId('deliberation-bounds')
-  const sources = []
+  const sources: LifeEvent[] = []
   for (let index = 0; index < 24; index++) sources.push(await ctx.genesis.observe({ sessionId, eventId: `source-${index}`,
     kind: 'assistant-message', timestamp: '2026-10-25T00:00:00.000Z' }))
   const memory = await ctx.genesis.remember({ category: 'semantic', content: 'A memory with more than twenty supporting events.',
@@ -373,7 +454,8 @@ it.each([24000, 2400])('deliberation omits whole over-budget evidence records an
       expect(new Set(selected)).toEqual(new Set([input.triggerEventId, sources[0]!.id, ...input.recentEvents.map(item => item.id),
         ...input.personalityEvidence.flatMap(item => item.sourceEventIds)]))
       const response = JSON.stringify({ motivations: [], goals: [], candidates: [{ disposition: 'wait', action: 'Wait.', reason: 'No work needed.',
-        factors: { motivation: 0, interest: 0, commitment: 0, emotion: 0, needs: 0, benefit: 0, cost: 0, risk: 0, urgency: 0, relationship: 0, context: 0 },
+        factors: { motivation: 0, interest: 0, commitment: 0, emotion: 0, needs: 0, benefit: 0, cost: 0,
+          risk: 0, urgency: 0, relationship: 0, context: 0 },
         goalIds: [], motivationIds: [] }], selected: 0, reason: 'Wait for another event.' })
       yield { type: 'block-start', index: 0, blockType: 'text' }
       yield { type: 'text-delta', index: 0, text: response }
@@ -396,7 +478,7 @@ it('delivers one proactive choice as an assistant message, honors silence, and r
   const factors = { motivation: 0.8, interest: 0.5, commitment: 0.2, emotion: 0.6, needs: 0.8,
     benefit: 0.7, cost: 0.1, risk: 0.1, urgency: 0.2, relationship: 0.8, context: 0.7 }
   class SocialWriter extends LlmAdapter {
-    decisions = ['wait', 'accept', 'accept']
+    decisions = ['wait', 'accept', 'accept', 'accept']
     decisionCount = 0
     override async resolveModel(provider: string, model: string) { return { provider, id: model, name: model } }
     override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
@@ -432,7 +514,7 @@ it('delivers one proactive choice as an assistant message, honors silence, and r
   const committed = (await first.genesis.snapshot()).initiative!.records.find(item => item.key === 'speak-choice')!
   expect(committed).toMatchObject({ status: 'sent', message: 'A thought I wanted to share.', sessionId, reason: expect.any(String) })
   const socialInput = agent.session.ownEvents().find(event => event.type === 'user/message'
-    && event.data.source.kind === 'genesis-initiative')
+    && String(event.data.source.kind) === 'genesis-initiative')
   expect(socialInput?.type).toBe('user/message')
   expect(agent.session.ownEvents().filter(event => event.type === 'user/message' && event.data.source.kind === 'user')).toHaveLength(1)
   const receipts = agent.session.ownEvents().filter(event => event.type === 'assistant/message')
@@ -446,9 +528,11 @@ it('delivers one proactive choice as an assistant message, honors silence, and r
   expect(chat.requests).toHaveLength(2)
   await first.genesis.remember({ category: 'semantic', content: 'A significant new finding.', importance: 0.95,
     confidence: 0.9, sourceEventIds: [source.id] })
-  for (let attempt = 0; attempt < 20 && writer.decisionCount < 4; attempt++) await new Promise(resolve => setTimeout(resolve, 5))
-  expect(writer.decisionCount).toBe(4)
-  expect((await first.genesis.snapshot()).initiative!.records.some(item => item.key.startsWith('event:') && item.status === 'pending')).toBe(true)
+  await vi.waitFor(async () => {
+    expect(writer.decisionCount).toBe(4)
+    expect((await first.genesis.snapshot()).initiative!.records.some(item =>
+      item.key.startsWith('event:') && item.status === 'pending')).toBe(true)
+  })
   await first.genesisInitiative.tick()
   expect(writer.decisionCount).toBe(5)
   expect((await first.genesis.snapshot()).initiative!.records.some(item => item.key.startsWith('timer:'))).toBe(true)
@@ -488,7 +572,8 @@ it('loads interest review through Cordis, logs the formed contact and restores i
       this.requests.push(options)
       const text = options.messages.flatMap(message => message.content).filter(block => block.type === 'text')
         .map(block => block.text).join('\n')
-      const input = z.object({ conversation: z.array(z.object({ messages: z.array(z.object({ role: z.string(), seq: z.number() })) })) }).parse(JSON.parse(text))
+      const input = z.object({ conversation: z.array(z.object({
+        messages: z.array(z.object({ role: z.string(), seq: z.number() })) })) }).parse(JSON.parse(text))
       const user = input.conversation.at(-1)!.messages.find(item => item.role === 'user')!
       const response = JSON.stringify({ changes: [{ topic: 'watercolor painting', signal: 'contact', selfInitiated: false,
         reason: 'The character encountered watercolor in a real exchange.', sourceSeqs: [user.seq] }] })
@@ -673,6 +758,122 @@ class MemoryWriter extends ScriptedModel {
   }
 }
 
+it('shares sourced personality and speaking habits across chat, appraisal, choices and restart without saving a temporary style request', async () => {
+  const root = await directory()
+  const memory = { ...(await embeddingFixture()).config, associationLimit: 0 }
+  const personality = { tendencies: '体贴、好奇，也愿意表达不同意见。', speakingStyle: '严肃讨论时温和而直接。' }
+  const first = await boot(root, true, memory, true, false, false, true, true, false, undefined, false, true, false, personality)
+  await first.genesis.awaken('小芽')
+  const initial = await first.genesis.snapshot()
+  const style = initial.memories.find(item => item.category === 'procedural')!
+  const expectedIds = initial.memories.filter(item => item.kind === 'non-declarative').map(item => item.id).sort()
+  expect((await first.genesisStatus.personality(new AbortController().signal)).entries.map(item => item.id).sort()).toEqual(expectedIds)
+  const persistentStyle = '今后的严肃讨论先简洁说明观点，保留温和语气。'
+  class PersonalityWriter extends ScriptedModel {
+    constructor() { super([]) }
+    override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+      this.requests.push(options)
+      const text = options.messages[0]!.content.find(block => block.type === 'text')!
+      if (text.type !== 'text') throw new Error('Missing writer input')
+      const raw = z.record(z.string(), z.unknown()).parse(JSON.parse(text.text))
+      let response: object
+      if (raw['trigger'] !== undefined) {
+        const input = z.object({ personalityEvidence: z.array(z.object({ id: z.string(), content: z.string() })) }).parse(raw)
+        expect(input.personalityEvidence.map(item => item.id).sort()).toEqual(expectedIds)
+        expect(options.system).toContain('Let applicable tendencies influence event interpretation, choices and expression')
+        response = { motivations: [], goals: [], candidates: [{ disposition: 'accept', action: 'Discuss the request thoughtfully.',
+          reason: 'The request is compatible with the current tendencies and commitments.', goalIds: [], motivationIds: [],
+          factors: { motivation: 0, interest: 0, commitment: 0, emotion: 0, needs: 0, benefit: 0.5,
+            cost: 0, risk: 0, urgency: 0, relationship: 0, context: 0.5 } }],
+        selected: 0, reason: 'Discuss the request thoughtfully.' }
+      } else if (raw['emotion'] !== undefined) {
+        const input = z.object({ selfMemories: z.array(z.object({ id: z.string(), content: z.string() })),
+          conversation: z.array(z.object({ messages: z.array(z.object({ role: z.string(), seq: z.number() })) })) }).parse(raw)
+        expect(input.selfMemories.map(item => item.id).sort()).toEqual(expectedIds)
+        expect(options.system).toContain('Current emotion and relationship context modulate their expression')
+        response = { delta: {}, moodDelta: {}, needsDelta: {}, reason: 'No enduring emotional change.',
+          sourceSeqs: [input.conversation.at(-1)!.messages.find(item => item.role === 'user')!.seq],
+          appraisal: { ...supportAppraisal, kind: 'neutral', importance: 0.1, summary: 'A discussion of expression preferences.' } }
+      } else {
+        const input = z.object({ conversation: z.array(z.object({ role: z.string(), seq: z.number(), text: z.string() })) }).parse(raw)
+        expect(options.system).toContain('仅适用于本次回答或任务')
+        const user = input.conversation.find(item => item.role === 'user')!
+        response = { changes: user.text.includes('From now on') ? [{ action: 'upsert', id: style.id, sourceSeqs: [user.seq],
+          memory: { category: 'procedural', kind: 'non-declarative', attribution: 'user-stated',
+            content: persistentStyle, importance: 0.8, confidence: 0.9 } }] : [] }
+      }
+      yield* new ScriptedModel([JSON.stringify(response)]).stream(options)
+    }
+  }
+  const writer = new PersonalityWriter()
+  first.llm.registerAdapter(['memory-writer'], writer)
+  first.llm.registerAdapter(['memory-decision'], new ScriptedModel(Array(4).fill('{"update":true}')))
+  const chat = new ScriptedModel(['I can keep this reply brief.', 'I will use that style in serious discussions.'])
+  first.llm.registerAdapter(['fixture'], chat)
+  const agent = await first.agentLoop.create(SessionId('personality-teaching'), { provider: 'fixture', model: 'chat' })
+  const say = async (text: string) => {
+    agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text }] }))
+    await agent.whenIdle()
+  }
+  await say('Be brief this time.')
+  expect((await first.genesis.getMemory(style.id))?.content).toBe(personality.speakingStyle)
+  expect((await first.genesis.snapshot()).memories).toHaveLength(initial.memories.length)
+  await say('From now on, state your view concisely during serious discussions while remaining warm.')
+  const changed = await first.genesis.getMemory(style.id)
+  expect(changed).toMatchObject({ content: persistentStyle, attribution: 'user-stated' })
+  expect(changed?.history?.[0]?.content).toBe(personality.speakingStyle)
+  const firstContext = chat.requests[0]!.messages.flatMap(message => message.content)
+    .filter(block => block.type === 'text').map(block => block.text).find(text => text.includes('Non-declarative candidate memories:'))!
+  expect(firstContext).toContain(personality.tendencies)
+  expect(firstContext).toContain(personality.speakingStyle)
+  expect(firstContext).toContain('configured-initial-tendency')
+  expect(firstContext).not.toContain(style.id)
+  expect(JSON.stringify(agent.session.ownEvents())).toContain('configured-initial-tendency')
+  await first.fiber.dispose()
+  const second = await boot(root, true, memory, true, false, false, true, true, false, undefined, false, true, false,
+    { ...personality, speakingStyle: 'This changed configuration must not reset the learned style.' })
+  expect((await second.genesis.snapshot()).identity).toEqual(initial.identity)
+  expect(await second.genesis.getMemory(style.id)).toEqual(changed)
+  second.llm.registerAdapter(['memory-writer'], new PersonalityWriter())
+  second.llm.registerAdapter(['memory-decision'], new ScriptedModel(Array(2).fill('{"update":true}')))
+  const reader = new ScriptedModel(['My speaking habits continue across conversations.'])
+  second.llm.registerAdapter(['fixture'], reader)
+  const other = await second.agentLoop.create(SessionId('personality-later'), { provider: 'fixture', model: 'chat' })
+  other.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Let us discuss another serious topic.' }] }))
+  await other.whenIdle()
+  expect(JSON.stringify(reader.requests)).toContain(persistentStyle)
+  expect(JSON.stringify(reader.requests)).not.toContain('must not reset')
+  expect((await second.genesis.snapshot()).events.filter(event => event.type === 'personality.initialized')).toHaveLength(1)
+})
+
+it.each([false, true])('injects only concise non-declarative memory without automatic recall (memory engine %s)', async (enabled) => {
+  const root = await directory()
+  const memory = enabled ? { ...(await embeddingFixture()).config, associationLimit: 0 } : undefined
+  const ctx = await boot(root, true, memory)
+  const birth = (await ctx.genesis.snapshot()).events[0]!
+  const habit = await ctx.genesis.remember({ category: 'procedural', content: 'Use a gentle tone.',
+    kind: 'non-declarative', attribution: 'user-stated', importance: 0.9, confidence: 0.8, sourceEventIds: [birth.id] })
+  const fact = await ctx.genesis.remember({ category: 'semantic', content: 'The operator prefers oolong.',
+    kind: 'declarative', attribution: 'user-stated', importance: 1, confidence: 0.9, sourceEventIds: [birth.id] })
+  const chat = new ScriptedModel(['Hello.'])
+  ctx.llm.registerAdapter(['fixture'], chat)
+  if (enabled) ctx.llm.registerAdapter(['memory-decision'], new ScriptedModel(['{"update":false}']))
+  const agent = await ctx.agentLoop.create(SessionId('concise-context'), { provider: 'fixture', model: 'chat' })
+  agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Hello.' }] }))
+  await agent.whenIdle()
+  const runtime = chat.requests[0]!.messages.flatMap(message => message.content)
+    .filter(block => block.type === 'text').map(block => block.text).find(text => text.includes('Non-declarative candidate memories:'))!
+  expect(runtime).toContain('Use a gentle tone.')
+  expect(runtime).toContain('80%')
+  expect(runtime).not.toContain('prefers oolong')
+  for (const metadata of [habit.id, fact.id, birth.id, 'updatedAt', 'createdAt', 'sourceEventIds', 'declarationHash']) {
+    expect(runtime).not.toContain(metadata)
+  }
+  expect(agent.session.ownEvents().filter(event => event.type === 'user/message')
+    .flatMap(event => event.data.content).some(block => block.type === 'text' && block.text === runtime)).toBe(true)
+  expect((await ctx.genesis.getMemory(fact.id))?.content).toBe(fact.content)
+})
+
 it('requires configuration and naming, learns without a catalogue, and restores one character with isolated conversation context', async () => {
   const root = await directory()
   const embeddings = await embeddingFixture()
@@ -702,7 +903,7 @@ it('requires configuration and naming, learns without a catalogue, and restores 
   await agent.whenIdle()
   expect(model.requests[0]?.tools?.map(tool => tool.name)).toEqual(['genesis_recall', 'learn'])
   expect(JSON.stringify(model.requests[0])).not.toContain('genesis_history')
-  expect(JSON.stringify(model.requests[0])).toContain('innocence')
+  expect(JSON.stringify(model.requests[0])).toContain('Let applicable tendencies influence event interpretation, choices and expression')
   expect(model.requests[1]?.tools?.map(tool => tool.name)).toEqual(['genesis_recall', 'learn'])
   expect(first.genesis.learningStatus().tools).toEqual(['genesis_recall'])
   const deny = first.tools.guard(exec => exec.name === 'genesis_recall' ? 'Independent permission denial' : undefined)
@@ -764,6 +965,7 @@ it('reviews with independent models, searches embeddings across isolated Session
   expect(declarative.attribution).toBe('user-stated')
   expect(state.events.some(event => event.id === declarative.sourceEventIds[0] && event.source === 'user')).toBe(true)
   expect(writer.requests).toHaveLength(1)
+  expect(writer.requests[0]?.system).toContain('所有新写或改写的记忆正文、经历摘要、主题、习惯线索和习惯响应都必须使用中文')
   const audit = agent.session.ownEvents().map(genesisAuditRecord).filter(record => record?.type === 'plugin:genesis/memory-call')
   expect(audit).toHaveLength(4)
   expect(JSON.stringify(audit)).toContain('The user prefers oolong.')
@@ -1067,7 +1269,7 @@ it('shares one life and learned memories across all five presets while limiting 
       expect(JSON.stringify(request.messages)).toContain('Time sampled while preparing turn')
       expect(agent.session.ownEvents().some(event => event.type === 'user/message' && event.data.source.kind === 'time-context')).toBe(true)
       expect(request.tools?.map(tool => tool.name)).toEqual(['genesis_recall', 'learn'])
-      expect(JSON.stringify(request)).toContain('innocence')
+      expect(JSON.stringify(request)).toContain('Let applicable tendencies influence event interpretation, choices and expression')
     } else {
       expect(request.tools?.some(tool => tool.name === 'genesis_recall')).toBe(true)
       expect(JSON.stringify(request)).not.toContain('innocence')
@@ -1255,6 +1457,11 @@ it('remembers an experience across turns, preserves changed preferences and reca
   const firstRequest = JSON.stringify(reader.requests[0])
   expect(firstRequest).toContain('Associated candidate memories')
   expect(firstRequest).toContain('currently prefers black tea')
+  expect(firstRequest).toContain('previousInterpretations')
+  expect(firstRequest).not.toContain(current.id)
+  expect(firstRequest).not.toContain('updatedAt')
+  expect(firstRequest).not.toContain('sourceEventIds')
+  expect(firstRequest).not.toContain('The user prefers oolong.')
   expect(firstRequest).not.toContain('Unstored private marker')
   const recall = other.session.ownEvents().find(event => event.type === 'tool/result')
   expect(JSON.stringify(recall)).toContain('The user prefers oolong.')
@@ -1322,7 +1529,7 @@ class ThinkingWriter extends HabitWriter {
     } }
   }
   override async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
-    if (!options.system?.includes('Consolidate the supplied candidate memories')) {
+    if (!options.system?.includes('仅依据所引用的证据整理提供的候选记忆')) {
       yield * super.stream(options)
       return
     }
@@ -1499,6 +1706,7 @@ it('organizes only the selected versions into one or several sourced memories, w
   expect(auditId).toBeTruthy()
   expect(ctx.agents.list()).toHaveLength(0)
   expect(writer.requests).toHaveLength(2)
+  expect(writer.requests[0]?.system).toContain('所有新记忆的正文必须使用中文')
   const writerInput = writer.requests[0]!.messages[0]!.content.find(block => block.type === 'text')!
   if (writerInput.type !== 'text') throw new Error('Missing organizer input')
   const provided = z.object({ memories: z.array(z.object({ id: z.string() })) }).parse(JSON.parse(writerInput.text))
@@ -1578,16 +1786,16 @@ it('refuses foreign evidence and concurrent source edits without publishing part
   await expect(ctx.genesisMemory.organize(request, signal)).rejects.toThrow('outside the selected evidence')
   expect((await ctx.genesis.snapshot()).memories).toHaveLength(3)
   writer.foreignEvidence = false
-  const entered = Promise.withResolvers<void>()
-  const released = Promise.withResolvers<void>()
-  writer.beforeReply = () => { entered.resolve(); return released.promise }
+  const entered = Promise.withResolvers<undefined>()
+  const released = Promise.withResolvers<undefined>()
+  writer.beforeReply = () => { entered.resolve(undefined); return released.promise }
   const operation = ctx.genesisMemory.organize(request, signal)
   const rejected = expect(operation).rejects.toThrow('changed or was deleted')
   try {
     await entered.promise
     await ctx.genesisMemory.save(memories[0]!.id, { content: 'The operator now prefers green tea.', category: 'semantic',
       kind: 'declarative', confidence: 0.8, importance: 0.6 }, memories[0]!.updatedAt, signal)
-  } finally { released.resolve() }
+  } finally { released.resolve(undefined) }
   await rejected
   const state = await ctx.genesis.snapshot()
   expect(state.memories).toHaveLength(3)
@@ -1718,7 +1926,7 @@ it('defers interrupted consolidation without spending retries and drains its wri
   const released = Promise.withResolvers<undefined>()
   class InterruptibleWriter extends HabitWriter {
     override async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
-      if (options.system?.includes('Consolidate the supplied candidate memories')) {
+      if (options.system?.includes('仅依据所引用的证据整理提供的候选记忆')) {
         entered.resolve(options.signal!)
         options.signal?.addEventListener('abort', () => { aborted.resolve(undefined) }, { once: true })
         await released.promise
@@ -1792,9 +2000,9 @@ it('persists sourced emotion across dialogue windows, replay and Loader restarts
   expect(changed.emotion?.needs.socialSatisfaction).toBeCloseTo(0.55, 6)
   const relationship = changed.emotion?.version === 3 ? changed.emotion.relationship : null
   expect(relationship?.values.attachment).toBe(0.005)
-  expect(chat.requests[0]!.messages.flatMap(message => message.content).filter(block => block.type === 'text').map(block => block.text).join('\n')).toContain('"happiness":0')
+  expect(chat.requests[0]!.messages.flatMap(message => message.content).filter(block => block.type === 'text').map(block => block.text).join('\n')).toContain('happiness 0%')
   await say('We can continue tomorrow.')
-  expect(chat.requests[1]!.messages.flatMap(message => message.content).filter(block => block.type === 'text').map(block => block.text).join('\n')).toContain('"happiness":0.2')
+  expect(chat.requests[1]!.messages.flatMap(message => message.content).filter(block => block.type === 'text').map(block => block.text).join('\n')).toContain('happiness 20%')
   expect(JSON.stringify(chat.requests[1])).toContain('simulated character state')
   expect(JSON.stringify(decisions.requests[3])).toContain('Private emotion source marker.')
   expect(writer.requests).toHaveLength(1)
@@ -1808,7 +2016,7 @@ it('persists sourced emotion across dialogue windows, replay and Loader restarts
   expect(JSON.stringify(record)).toContain('needsDelta')
   const beforeReplay = await first.genesis.snapshot()
   const resolved = Genesis.Config({ leasePath: join(root, 'writer.lock'), memory: config, emotion: {} })
-  const engine = new LifeEmotionEngine(first, first.genesis, resolved.emotion!, config, () => memoryModels(config))
+  const engine = new LifeEmotionEngine(first, first.genesis, resolved.emotion!, config, () => memoryModels(config), resolved)
   await engine.review(agent, 2, new AbortController().signal)
   await engine.close()
   expect(writer.requests).toHaveLength(1)
@@ -1833,8 +2041,9 @@ it('persists sourced emotion across dialogue windows, replay and Loader restarts
   const other = await second.agentLoop.create(SessionId('emotion-unrelated'), { provider: 'fixture', model: 'chat' })
   other.followup(createUserMessage({ content: [{ type: 'text', text: 'Hello in another conversation.' }], source: { kind: 'user' } }))
   await other.whenIdle()
-  expect(JSON.stringify(reader.requests)).toContain(relationship!.id)
-  expect(reader.requests.at(-1)!.messages.flatMap(message => message.content).filter(block => block.type === 'text').map(block => block.text).join('\n')).toContain('"happiness":0.2')
+  expect(JSON.stringify(reader.requests.at(-1))).not.toContain(relationship!.id)
+  expect(JSON.stringify(reader.requests.at(-1))).toContain('Relationship estimates toward')
+  expect(reader.requests.at(-1)!.messages.flatMap(message => message.content).filter(block => block.type === 'text').map(block => block.text).join('\n')).toContain('happiness 20%')
   expect(JSON.stringify(reader.requests.at(-1))).not.toContain('Private emotion source marker.')
   expect((await second.genesisStatus.inspect(new AbortController().signal)).emotion?.review?.state).toBe('skipped')
   expect((await second.genesis.snapshot()).events.filter(event => event.type === 'emotion.initialized')).toHaveLength(1)
@@ -2002,11 +2211,11 @@ it('does not start an emotion writer when the operator pauses appraisal during a
   const root = await directory()
   const embeddings = await embeddingFixture()
   const ctx = await boot(root, true, { ...embeddings.config, associationLimit: 0 }, false, false, false, false, true)
-  const entered = Promise.withResolvers<void>()
-  const release = Promise.withResolvers<void>()
+  const entered = Promise.withResolvers<undefined>()
+  const release = Promise.withResolvers<undefined>()
   class HeldDecision extends ScriptedModel {
     override async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
-      if (options.system === EMOTION_DECISION_PROMPT) { entered.resolve(); await release.promise }
+      if (options.system === EMOTION_DECISION_PROMPT) { entered.resolve(undefined); await release.promise }
       yield * super.stream(options)
     }
   }
@@ -2020,7 +2229,7 @@ it('does not start an emotion writer when the operator pauses appraisal during a
     await entered.promise
     const sampled = (await ctx.genesisStatus.inspect(new AbortController().signal)).emotion!
     await ctx.genesisStatus.saveEmotionSettings({ ...sampled.settings, enabled: false }, sampled.revision, new AbortController().signal)
-  } finally { release.resolve() }
+  } finally { release.resolve(undefined) }
   await agent.whenIdle()
   expect(writer.requests).toHaveLength(0)
   expect((await ctx.genesis.snapshot()).events.filter(event => event.type === 'emotion.reviewed')).toHaveLength(0)

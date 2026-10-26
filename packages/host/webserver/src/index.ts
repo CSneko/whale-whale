@@ -79,8 +79,9 @@ export interface Config {
    * for example the container's own Pod address from `hostname -i`. A loopback
    * literal (any address in 127/8, `::1`, or a mapped form of either) keeps the
    * server on this machine; any other literal serves the network that address
-   * belongs to, over plain HTTP unless `tls` is set. Unspecified addresses
-   * require explicit allowWildcardHost because they expose every interface.
+   * belongs to, over plain HTTP unless `tls` is set. The unspecified address —
+   * IPv4 any, IPv6 any, and the IPv4-mapped forms of IPv4 any — is rejected at
+   * load: it would expose the port on every interface at once.
    */
   host: string
   /** Explicitly permit wildcard binding for deployments with configured authentication. Default: false. */

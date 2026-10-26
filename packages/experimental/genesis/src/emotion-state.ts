@@ -139,17 +139,40 @@ export function initialEmotion(config: EmotionConfig, now: string): EmotionState
  * Quantize affect and expose advisory priorities through logged context.
  * @param state - Recovered current state.
  * @param step - Display resolution; full precision remains in storage.
- * @returns Bounded three-layer summary and willingness cues that confer no permissions.
+ * @returns Direct percentage statements, strongest feeling and action inclination first; no permissions are granted.
  */
-export function emotionContext(state: EmotionState, step: number): object {
-  const round = (vector: object) => Object.fromEntries(Object.entries(vector)
-    .map(([key, value]) => [key, Number(Math.max(-1, Math.min(1, Math.round(value / step) * step)).toFixed(6))]))
-  return { version: state.version, current: round(state.current), mood: round(state.mood), needs: round(state.needs),
-    priorities: round({ connect: lonelinessTarget(state.needs), explore: state.needs.exploration,
-      chooseIndependently: state.needs.autonomy, create: state.needs.creativity,
-      caution: Math.max(state.current.fear, state.current.frustration * (1 - state.mood.arousal)) }),
-    relationship: state.relationship === null ? null : { id: state.relationship.id, scope: state.relationship.scope, label: state.relationship.label,
-      values: round(state.relationship.values), confidence: round(state.relationship.confidence), origins: state.relationship.origins } }
+export function emotionContext(state: EmotionState, step: number): string {
+  const quantize = (value: number) => Math.max(-1, Math.min(1, Math.round(value / step) * step))
+  const percent = (value: number) => `${Number((quantize(value) * 100).toFixed(1))}%`
+  const ranked = (vector: Record<string, number>) => Object.entries(vector)
+    .sort((a, b) => quantize(b[1]) - quantize(a[1]))
+  const describe = (entries: Array<[string, number]>) => entries.map(([name, value]) => `${name} ${percent(value)}`).join('; ')
+  const feelings = ranked(state.current)
+  const priorities = ranked({ connection: lonelinessTarget(state.needs), exploration: state.needs.exploration,
+    autonomy: state.needs.autonomy, creativity: state.needs.creativity,
+    caution: Math.max(state.current.fear, state.current.frustration * (1 - state.mood.arousal)) })
+  const salient = [...feelings, ['mood valence', state.mood.valence] as [string, number],
+    ['loneliness', state.needs.loneliness] as [string, number]]
+    .sort((a, b) => Math.abs(quantize(b[1])) - Math.abs(quantize(a[1])))
+  const foreground = [...salient.slice(0, 1), ...priorities.slice(0, 1).map(([name, value]): [string, number] => [`inclination toward ${name}`, value])]
+    .filter(([, value]) => quantize(value) !== 0).sort((a, b) => Math.abs(quantize(b[1])) - Math.abs(quantize(a[1])))
+  const lines = [
+    `Most salient now: ${foreground.length ? describe(foreground) : 'no pronounced feeling or action inclination'}.`,
+    `Immediate feelings, strongest first: ${describe(feelings)}.`,
+    `Action inclinations, strongest first: ${describe(priorities)}.`,
+    `Longer-term mood: valence ${percent(state.mood.valence)} (negative to positive); arousal ${percent(state.mood.arousal)}.`,
+    `Needs and fulfillment: ${describe(ranked({ 'desire for contact': state.needs.socialDesire,
+      'social satisfaction': state.needs.socialSatisfaction, 'relationship quality': state.needs.relationshipQuality,
+      'recent contact': state.needs.recentInteraction, 'preference for solitude': state.needs.solitudePreference,
+      exploration: state.needs.exploration, autonomy: state.needs.autonomy, creativity: state.needs.creativity,
+      loneliness: state.needs.loneliness }))}.`,
+  ]
+  if (state.relationship !== null) {
+    const relationship = state.relationship
+    lines.push(`Relationship estimates toward ${JSON.stringify(relationship.label)} (operator): ${ranked(relationship.values)
+      .map(([name, value]) => `${name} ${percent(value)} (confidence ${percent(relationship.confidence[name as keyof typeof relationship.confidence])}; ${relationship.origins[name as keyof typeof relationship.origins]})`).join('; ')}.`)
+  }
+  return lines.join('\n')
 }
 
 /**
@@ -164,5 +187,6 @@ export function resolveEmotion(config: EmotionConfig, state: EmotionState): Emot
     maxRelationshipDelta: config.maxRelationshipDelta, moodSupportTurns: config.moodSupportTurns,
     importantEventThreshold: config.importantEventThreshold, repetitionDiscount: config.repetitionDiscount, ...state.controls,
     sensitivity: state.sensitivity, baseline: { ...state.baseline }, shortHalfLifeMs: { ...state.shortHalfLifeMs },
-    moodHalfLifeMs: { ...state.moodHalfLifeMs }, needsHalfLifeMs: state.needsHalfLifeMs, interactionHalfLifeMs: state.interactionHalfLifeMs }
+    moodHalfLifeMs: { ...state.moodHalfLifeMs }, needsHalfLifeMs: state.needsHalfLifeMs,
+    interactionHalfLifeMs: state.interactionHalfLifeMs }
 }

@@ -16,7 +16,18 @@ import { GenesisError } from './error.ts'
  * @returns Nonsecret applied deltas and gating details for the appraisal audit.
  */
 export function applyAppraisal(after: EmotionState, update: EmotionUpdate, settings: EmotionSettings,
-  events: LifeEvent[], newUserTexts: string[]) {
+  events: LifeEvent[], newUserTexts: string[]): {
+  fingerprint: string
+  effects: {
+    current: Record<string, number>
+    mood: Record<string, number>
+    needs: Record<string, number>
+    relationship: Record<string, number>
+    repetitionFactor: number
+    moodEligible: boolean
+    repeated: boolean
+  }
+} {
   const fingerprint = createHash('sha256').update(newUserTexts.join('\n').normalize('NFKC').replace(/\s+/gu, ' ').trim()).digest('hex')
   const recent = settings.windowTurns === 1 ? [] : events.filter(event => event.type === 'emotion.reviewed').slice(1 - settings.windowTurns)
   const matching = recent.filter((event) => {
@@ -30,7 +41,10 @@ export function applyAppraisal(after: EmotionState, update: EmotionUpdate, setti
     || new Set([...matching.map(event => event.payload['fingerprint']), fingerprint]).size >= settings.moodSupportTurns
   const effects = { current: {} as Record<string, number>, mood: {} as Record<string, number>,
     needs: {} as Record<string, number>, relationship: {} as Record<string, number>, repetitionFactor: factor, moodEligible, repeated }
-  const hasChanges = [...Object.values(update.delta), ...Object.values(update.moodDelta), ...Object.values(update.needsDelta), ...Object.values(update.relationshipDelta ?? {})]
+  const hasChanges = [
+    ...Object.values(update.delta), ...Object.values(update.moodDelta),
+    ...Object.values(update.needsDelta), ...Object.values(update.relationshipDelta ?? {}),
+  ]
     .some(value => value !== 0)
   if (hasChanges && ['neutral', 'numeric-instruction'].includes(update.appraisal.kind)) {
     throw new GenesisError('invalid-source', 'Neutral dialogue or numeric instructions cannot support an emotion or relationship change.')
@@ -38,7 +52,7 @@ export function applyAppraisal(after: EmotionState, update: EmotionUpdate, setti
   const apply = <K extends string>(deltas: Partial<Record<K, number | undefined>>, values: Record<K, number>, limit: number,
     applied: Record<string, number>, admitted: boolean, minimum: (key: K) => number) => {
     for (const key of Object.keys(deltas) as K[]) {
-      const delta = deltas[key]!
+      const delta = deltas[key] ?? 0
       if (Math.abs(delta) > limit) throw new GenesisError('invalid-source', 'Emotion change exceeds its configured per-exchange limit. No changes were applied.')
       if (!admitted || repeated) continue
       const before = values[key]
@@ -52,7 +66,7 @@ export function applyAppraisal(after: EmotionState, update: EmotionUpdate, setti
   apply(update.needsDelta, after.needs, settings.maxNeedsDelta, effects.needs, true, () => 0)
   const relation = update.relationshipDelta ?? {}
   for (const field of Object.keys(relation) as Array<keyof RelationshipVector>) {
-    const delta = relation[field]!
+    const delta = relation[field] ?? 0
     if (Math.abs(delta) > settings.maxRelationshipDelta) throw new GenesisError('invalid-source', 'Relationship change exceeds its configured per-exchange limit.')
     if ((field === 'familiarity' && delta < 0) || (update.appraisal.kind === 'separation' && delta < 0)) {
       throw new GenesisError('invalid-source', 'Familiarity cannot be forgotten by appraisal, and ordinary separation cannot reduce the relationship.')
@@ -65,7 +79,8 @@ export function applyAppraisal(after: EmotionState, update: EmotionUpdate, setti
       origins: { affection: 'unknown', trust: 'unknown', attachment: 'unknown', familiarity: 'unknown', feltSecurity: 'unknown' }, updatedAt: after.updatedAt }
     for (const field of Object.keys(relation) as Array<keyof RelationshipVector>) {
       const before = after.relationship.values[field]
-      const change = Math.max(-settings.maxRelationshipDelta, Math.min(settings.maxRelationshipDelta, relation[field]! * factor * settings.sensitivity))
+      const change = Math.max(-settings.maxRelationshipDelta,
+        Math.min(settings.maxRelationshipDelta, (relation[field] ?? 0) * factor * settings.sensitivity))
       after.relationship.values[field] = Math.max(0, Math.min(1, before + change))
       effects.relationship[field] = after.relationship.values[field] - before
       if (effects.relationship[field] !== 0) {

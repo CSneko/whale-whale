@@ -19,6 +19,7 @@ Open dedicated Life information, Knowledge Base, Memories and Emotion pages to i
 ## Use
 
 Apply this package’s `cordis.patch.yml` beside the [Genesis core overlay](../genesis/README.md) to a Web or Desktop profile with the preset registry. Rebuild browser bundles before launching. The [first-awakening tutorial](../../../docs/genesis/awakening.md) enables naming and the first greeting. Life information owns naming, identity and growth; Knowledge Base owns decision/writer/embedding settings. Memories owns bounded search, creation, editing, deletion and layer conversion. Experience times, associated experience IDs and expandable prior interpretations show how a memory formed and changed. The optional Life preset becomes the deployment default; an existing saved user choice takes precedence.
+
 When [interests](../../../docs/genesis/interest.md) are enabled, Life information also shows their current inferred stages, cited source IDs and bounded change history. The page does not edit interests.
 
 Memories also owns the durable automatic-consolidation toggle, explicit pass, last safe failure and learned habit cue/response/evidence. See [idle consolidation](../../../docs/genesis/memory.md#automatic-habits-and-idle-consolidation) for budgets and cancellation.
@@ -34,6 +35,10 @@ Memories includes an expandable operator identity form. Saving it safely relabel
 
 The plugin mounts the owning package’s generated Remote contribution, registers a `genesis` resource provider and contributes five localized settings pages and a manual memory action on each completed reply. Endpoint edits use revisioned life-owned storage; keys use the existing credential store and never enter configuration or memory. Settings failures show the affected operation and specific diagnostic, including HTTP status, validation fields or connection codes, without displaying password values or provider response bodies. Memory and emotion settings show the latest reviewed turn and completion time, including no-change outcomes; Jev decisions also show their update probability and captured threshold. Memory failures in chat and Knowledge Base show the failing stage and safe diagnostic; retry errors preserve their own cause. Retry feedback resets for a new failed turn. A failed save retains the draft; refresh and Reload configuration load the latest accepted values. The shared resource model owns fetched values and retains them after failure. Credential/settings/provider changes, conversation running-status changes, user refresh and reconnection request new samples; the plugin runs no polling timer. Aborting the resource cancels RPC and releases refresh listeners.
 
+Settings → Personality and speaking style groups enduring self tendencies and procedural speaking or behavioral habits. A dedicated bounded read selects these entries before unrelated memory previews. Add, edit, conversion and deletion reuse the existing version-fenced memory operations and editor; rejected writes retain the draft. This page does not call a model or expose trait-score controls.
+
+The Host life plugin owns character and memory instructions. This companion creates the first Session through the existing Session API and asks the Host to enqueue its logged built-in awakening. Provider checks prepare configured routes; endpoint checks authenticate against the model catalog, and embedding testing makes one request. Memory-text search and direct CRUD do not run inference. Per-reply generation uses its source conversation and the independent writer, bypasses the decision model and enforces the chosen memory layer; automatic review remains enabled. See [memory controls](../../../docs/genesis/memory.md) for version checks, sources and retry behavior.
+
 Settings → Her writings browses, searches, reads, edits and deletes the character’s writings and manages their categories through the authenticated records Remote. Shared on-demand resources retain data on failure; captured drafts and revision checks protect edits. See [writings](../../../docs/genesis/records.md) for deletion, attribution and recovery.
 
 <a id="further-exploration"></a>
@@ -44,7 +49,7 @@ Settings → Her writings browses, searches, reads, edits and deletes the charac
 <a id="model-experience"></a>
 ## Model Experience
 
-The Host life plugin owns character and memory instructions. This companion creates the first Session through the existing Session API and asks the Host to enqueue its logged built-in awakening. Provider checks prepare configured routes; endpoint checks authenticate against the model catalog, and embedding testing makes one request. Memory-text search and direct CRUD do not run inference. Per-reply generation uses its source conversation and the independent writer, bypasses the decision model and enforces the chosen memory layer; automatic review remains enabled. See [memory controls](../../../docs/genesis/memory.md) for version checks, sources and retry behavior.
+None, as this page manages Genesis state through bounded Host operations and sends no settings or memory previews to a chat model.
 
 #### KV Cache effect
 

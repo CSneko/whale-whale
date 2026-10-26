@@ -1,4 +1,5 @@
 /** Life status and one-time naming, exported through the existing authenticated Gateway. @module */
+import { isNonDeclarative } from './personality.ts'
 import type { ContextFormed } from '@deepseek-ai/dsh-llm'
 import { Context } from '@deepseek-ai/cordis'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
@@ -9,7 +10,7 @@ import type { LifeMemoryEngine } from './memory.ts'
 import type { ModelPreferences } from './model-preferences.ts'
 import { catalogModels, modelCatalogUrl, modelHeaders, modelJson } from './model-endpoint.ts'
 import type { MemoryModelsSettings } from './status-types.ts'
-import type { LifeStatus } from './status-types.ts'
+import type { LifeStatus, PersonalityStatus } from './status-types.ts'
 import type { Config } from './config.ts'
 import { GenesisError } from './error.ts'
 import { memoryView } from './memory.ts'
@@ -273,6 +274,30 @@ export class GenesisStatusGateway extends TypertRemoteService {
   }
 
   /**
+   * Read personality and expression memories independently of unrelated memory previews.
+   * @param signal - Caller cancellation before the bounded read.
+   * @returns Current behavioral records and an explicit count of omitted matches, without vector caches.
+   */
+  @Remote('personality')
+  personality(signal: AbortSignal): Promise<PersonalityStatus> {
+    return this.operation(signal, async (owned) => {
+      const state = await this.ctx.genesis.snapshot()
+      owned.throwIfAborted()
+      const found = state.memories.filter(memory => isNonDeclarative(memory)
+        && (memory.category === 'self' || memory.category === 'procedural'))
+        .sort((a, b) => b.importance - a.importance || b.updatedAt.localeCompare(a.updatedAt))
+      const entries: LifeStatus['memories'] = []
+      for (const memory of found) {
+        if (entries.length >= this.options.config.queryLimit) break
+        const view = memoryView(memory)
+        if (JSON.stringify({ entries: [...entries, view], omitted: found.length - entries.length - 1 }).length
+          <= this.options.config.resultChars) entries.push(view)
+      }
+      return { entries, omitted: found.length - entries.length }
+    })
+  }
+
+  /**
    * Browse or search stored memory text without requiring an embedding request.
    * @param query - Literal search text, bounded by the configured response budget.
    * @param signal - Caller cancellation.
@@ -326,7 +351,9 @@ export class GenesisStatusGateway extends TypertRemoteService {
       }
       if (this.options.emotion !== undefined && state.emotion !== undefined) {
         const review = this.options.emotion.status()
-        result.emotion = { ...emotionAt(state.emotion, result.sampledAt), settings: resolveEmotion(this.options.config.emotion!, state.emotion),
+        const emotionConfig = this.options.config.emotion
+        if (emotionConfig === undefined) throw new GenesisError('invalid-state', 'Emotion status is available without emotion configuration.')
+        result.emotion = { ...emotionAt(state.emotion, result.sampledAt), settings: resolveEmotion(emotionConfig, state.emotion),
           history: [], omitted: 0, ...(review === undefined ? {} : { review }) }
       }
       if (this.options.interest !== undefined && state.interests !== undefined) {
@@ -394,7 +421,9 @@ export class GenesisStatusGateway extends TypertRemoteService {
       admit(result.capabilities, capabilities, 'capabilities')
       if (result.interest !== undefined) {
         const interests = state.interests ?? []
-        for (const item of interests.slice().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, this.options.config.queryLimit)) {
+        const recent = interests.slice().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+          .slice(0, this.options.config.queryLimit)
+        for (const item of recent) {
           result.interest.entries.push({ id: item.id, topic: item.topic, stage: item.stage, reason: item.reason,
             createdAt: item.createdAt, updatedAt: item.updatedAt, evidenceCount: item.evidence.length,
             sourceEventIds: item.evidence.at(-1)?.sourceEventIds ?? [] })

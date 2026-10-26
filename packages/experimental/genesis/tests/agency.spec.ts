@@ -115,6 +115,11 @@ it('rejects completion text, stale revisions, invalid selections, arbitrary refu
   expect(deliberationPlanSchema.safeParse({ ...input.plan, goals: [{ ...input.plan.goals[0], failures: -1 }] }).success).toBe(false)
   expect(deliberationPlanSchema.safeParse({ ...input.plan, goals: [{ ...input.plan.goals[0], failures: '1' }] }).success).toBe(false)
   expect(deliberationPlanSchema.safeParse({ ...input.plan, goals: [{ ...input.plan.goals[0], unexpected: true }] }).success).toBe(false)
+  for (const field of ['motivations', 'goals'] as const) {
+    for (const metadata of [{ createdAt: 'invalid-date' }, { updatedAt: 1 }, { history: [] }]) {
+      expect(deliberationPlanSchema.safeParse({ ...input.plan, [field]: [{ ...input.plan[field][0], ...metadata }] }).success).toBe(false)
+    }
+  }
   expect(deliberationPlanSchema.safeParse({ ...input.plan, selected: 5 }).success).toBe(false)
   await expect(opened.core.prepareDeliberation(SessionId('agency-session'), 'bad-trigger', 'event',
     brandString<LifeEventId>('00000000-0000-4000-8000-000000000000'))).rejects.toThrow('existing life event')

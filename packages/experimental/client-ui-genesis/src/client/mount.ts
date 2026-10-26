@@ -10,7 +10,7 @@ import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-resources/client'
-import type { LifeStatus, AgencyStatus } from '@deepseek-ai/dsh-experimental-genesis/types'
+import type { LifeStatus, AgencyStatus, PersonalityStatus } from '@deepseek-ai/dsh-experimental-genesis/types'
 import type { TypertRemoteContribution, RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { MemoryNotice, type MemoryNoticeActions, type MemoryNoticeState } from './MemoryNotice.tsx'
@@ -21,6 +21,7 @@ import { EmotionPanel, type EmotionActions } from './EmotionPanel.tsx'
 import { AgencyPanel, type AgencyActions } from './AgencyPanel.tsx'
 import { StatusPanel } from './StatusPanel.tsx'
 import { Awakening, LifeSetupHero } from './Awakening.tsx'
+import { PersonalityPanel } from './PersonalityPanel.tsx'
 import { MemoryPanel, type MemoryActions } from './MemoryPanel.tsx'
 import { ManualMemory, type ManualMemoryActions } from './ManualMemory.tsx'
 import { ReviewNotice } from './ReviewNotice.tsx'
@@ -30,7 +31,7 @@ import { mountRecords } from './records-resources.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap { genesis: GenesisKey }
-  interface ResourceProtocolMap { genesis: LifeStatus; 'genesis-agency': AgencyStatus }
+  interface ResourceProtocolMap { genesis: LifeStatus; 'genesis-agency': AgencyStatus; 'genesis-personality': PersonalityStatus }
 }
 
 /** Required infrastructure, with no stable product import of the experimental namespace. */
@@ -52,6 +53,9 @@ export async function mountStatus(ctx: Context, contribution: TypertRemoteContri
     }))
     scope.effect(() => scope.resources.register<'genesis-agency'>({ protocol: 'genesis-agency',
       open: (_address, { signal }) => resource.open(callerSignal => scope.remote.genesisAgency.inspect(callerSignal), signal),
+    }))
+    scope.effect(() => scope.resources.register<'genesis-personality'>({ protocol: 'genesis-personality',
+      open: (_address, { signal }) => resource.open(callerSignal => scope.remote.genesisStatus.personality(callerSignal), signal),
     }))
     scope.on('connection/reset', () => { resource.refresh() })
     scope.effect(() => {
@@ -208,6 +212,10 @@ export async function mountStatus(ctx: Context, contribution: TypertRemoteContri
       name: 'settings.section', id: 'genesis-memories', order: 17, locale: 'genesis',
       label: () => scope.locale.bind('genesis')('memoryPageTitle'), inject: memories,
     }, MemoryPanel))
+    scope.slots.inject('settings.section', () => scope.slots.register({
+      name: 'settings.section', id: 'genesis-personality', order: 17.5, locale: 'genesis',
+      label: () => scope.locale.bind('genesis')('personalityTitle'), inject: memories,
+    }, PersonalityPanel))
     const emotionMutation = async (work: Promise<RemoteResult<number>>, kind: 'emotion-settings' | 'emotion-adjustment' | 'relationship-adjustment', signal: AbortSignal | undefined) => {
       const failure = (error: unknown) => ({ ok: false as const, kind: 'emotion' as const,
         reason: operationFailure(error, [], scope.locale.bind('genesis')('unknownError')) })

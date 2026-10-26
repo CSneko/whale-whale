@@ -441,7 +441,7 @@ export type Config = LocalConfig
 /** Browser authentication, request limits, and connection recovery configuration. */
 export interface ConnectionConfig {
   /** Optional private key-file login bound to client IP and this process; absence retains the launch-token carrier. */
-  keyLogin?: KeyLoginConfig
+  keyLogin?: KeyLoginConfig | undefined
   /** Browser recovery timing, injected into each served page. */
   recovery?: ConnectionRecoveryConfig
   /**
@@ -1066,11 +1066,15 @@ export type Config = CuaConfig
 
 - `inject`: `storageDomain` · `tools` · `systemPrompt` · `agents` · `llm` · `sessionProjections` · `sandboxPolicy`
 - `refs`: `z` (`zod`)
-- `source`: [`packages/experimental/genesis/src/config.ts:5`](../packages/experimental/genesis/src/config.ts)
+- `source`: [`packages/experimental/genesis/src/config.ts:33`](../packages/experimental/genesis/src/config.ts)
 
 ```ts config-catalog
 /** Validated, resolved Genesis plugin configuration. */
 export interface Config {
+  /** Optional one-time personality initialization; omitted preserves the existing memories without seeding. */
+  personality?: PersonalityConfig | undefined
+  /** Lightweight proactive conversation; requires deliberation and memory. */
+  socialInitiative?: SocialInitiativeConfig | undefined
   /** Calendar zone for memory anchors and relative recall; defaults to the host's IANA zone. */
   timeZone: string
   /** Enables naming, newborn conversations and persistent tool learning on the configured chat route. */
@@ -1116,6 +1120,36 @@ export interface Config {
   modelCatalogChars: number
   /** Maximum records in a query response. */
   queryLimit: number
+}
+
+/** Initial prose settings stored once as ordinary non-declarative memories. */
+export interface PersonalityConfig {
+  /** Enduring character tendencies; later restarts never overwrite current memories. */
+  tendencies: string
+  /** Durable expression habits, modulated by the current conversation and emotion. */
+  speakingStyle: string
+  /** Existing memory importance used for both initial records. */
+  importance: number
+}
+
+/** Optional proactive conversation policy; durations are milliseconds. */
+export interface SocialInitiativeConfig {
+  /** Explicit conversation; absent selects the latest live character conversation with real user activity. */
+  sessionId?: string
+  /** Period between decision opportunities while the process runs. */
+  intervalMs: number
+  /** Minimum time between proactive messages. */
+  minSendIntervalMs: number
+  /** Maximum proactive messages in a rolling twenty-four hours. */
+  maxPer24Hours: number
+  /** Required quiet time after the latest real user message. */
+  userIdleMs: number
+  /** Memory importance required for discovery or thought triggers. */
+  eventImportance: number
+  /** Maximum unresolved opportunities. */
+  maxPending: number
+  /** Pending opportunities expire rather than sending stale messages. */
+  maxPendingAgeMs: number
 }
 
 /** Storage and complete-response limits for independently authored writing records. */
@@ -1911,8 +1945,9 @@ export interface Config {
    * for example the container's own Pod address from `hostname -i`. A loopback
    * literal (any address in 127/8, `::1`, or a mapped form of either) keeps the
    * server on this machine; any other literal serves the network that address
-   * belongs to, over plain HTTP unless `tls` is set. Unspecified addresses
-   * require explicit allowWildcardHost because they expose every interface.
+   * belongs to, over plain HTTP unless `tls` is set. The unspecified address —
+   * IPv4 any, IPv6 any, and the IPv4-mapped forms of IPv4 any — is rejected at
+   * load: it would expose the port on every interface at once.
    */
   host: string
   /** Explicitly permit wildcard binding for deployments with configured authentication. Default: false. */

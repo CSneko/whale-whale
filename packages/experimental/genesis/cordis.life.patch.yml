@@ -13,6 +13,7 @@
     leasePath: !!js dshHomePath('genesis.writer.lock')
     personalDirectory: !!js dshHomePath('personal')
     records: {}
+    personality: {}
     emotion: {}
     interest: {}
     deliberation: {}

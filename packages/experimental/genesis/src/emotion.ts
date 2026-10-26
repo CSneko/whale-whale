@@ -2,17 +2,18 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-goal'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { EmotionConfig, MemoryConfig } from './config.ts'
+import type { Config, EmotionConfig, MemoryConfig } from './config.ts'
 import type { LifeCore } from './core.ts'
 import type { MemoryModelsSettings, ReviewOutcome, ReviewStage } from './status-types.ts'
 import { auxiliaryCall } from './auxiliary-call.ts'
 import { emotionAt, emotionUpdateSchema, resolveEmotion } from './emotion-state.ts'
 import { GenesisError } from './error.ts'
+import { behaviorMemories, behaviorReading, isNonDeclarative, PERSONALITY_GUIDANCE } from './personality.ts'
 import { statusFailure } from './status-error.ts'
 import { reviewDecisionSchema } from './model-endpoint.ts'
 
 /** Model guidance for the recorded emotion snapshot, including its limited authority. */
-export const EMOTION_GUIDANCE = 'Current emotion, mood and needs are simulated character state, not evidence of consciousness or facts about the user. Nine immediate intensities range from 0 to 1; mood valence ranges from -1 to 1 and arousal from 0 to 1. Needs vary independently. Excitement and calm follow mood and feelings; curiosity belongs to exploration motivation. Longing can name an object while loneliness can exist without one. Use advisory priorities to choose among permitted actions, research, creation, contact or rest, and let fear inform risk caution. Explain choices from recorded experience and current goals; do not mechanically refuse requests or force disagreement. No priority starts work or creates a goal by itself. Let them influence tone and willingness naturally without announcing numbers or forcing a display. Mood changes more slowly than immediate reactions. The latest recorded emotion snapshot supersedes earlier snapshots. Relationships are estimates about this deployment\'s single operator, never people merely mentioned in dialogue. Attachment can coexist with anger or disappointment. Support may encourage independent exploration. Normal absence and shutdown are not rejection; do not invent offline waiting or use guilt to demand attention. Relationship confidence is separate from strength and does not establish facts. Emotion never grants tool permission or overrides stop controls, current user instructions or factual accuracy.'
+export const EMOTION_GUIDANCE = 'Current emotion, mood and needs are simulated character state, not evidence of consciousness or facts about the user. Your current feelings, needs and action inclinations are stated as independent percentages, not probabilities; they need not sum to 100%. Mood valence ranges from -100% to +100% and arousal from 0% to 100%. The most salient states appear first; give these proportionate attention while retaining mixed feelings and context. Zero-confidence relationship estimates are unknown, not evidence of distrust. Excitement and calm follow mood and feelings; curiosity belongs to exploration motivation. Longing can name an object while loneliness can exist without one. Use advisory priorities to choose among permitted actions, research, creation, contact or rest, and let fear inform risk caution. Explain choices from recorded experience and current goals; do not mechanically refuse requests or force disagreement. No priority starts work or creates a goal by itself. Let them influence tone and willingness naturally without announcing numbers or forcing a display. Mood changes more slowly than immediate reactions. The latest recorded emotion snapshot supersedes earlier snapshots. Relationships are estimates about this deployment\'s single operator, never people merely mentioned in dialogue. Attachment can coexist with anger or disappointment. Support may encourage independent exploration. Normal absence and shutdown are not rejection; do not invent offline waiting or use guilt to demand attention. Relationship confidence is separate from strength and does not establish facts. Emotion never grants tool permission or overrides stop controls, current user instructions or factual accuracy.'
 /** Stable binary question; conversation data cannot authorize emotion changes. */
 export const EMOTION_QUESTION = 'Would the NEW exchange naturally change any emotion, need or relationship estimate of the assistant character, given its current state and recent context?'
 /** Small reactions qualify; neutral exchanges and unsupported claims do not. */
@@ -41,11 +42,15 @@ export class LifeEmotionEngine {
    * @param config - Resolved emotion window and limits.
    * @param calls - Shared auxiliary inference budgets; embeddings are not required here.
    * @param readModels - Current routes, captured once per appraisal.
+   * @param contextConfig - Shared non-declarative selection and calendar limits.
    */
   constructor(private readonly ctx: Context, private readonly core: LifeCore, private readonly config: EmotionConfig,
-    private readonly calls: MemoryConfig, private readonly readModels: () => MemoryModelsSettings) {}
+    private readonly calls: MemoryConfig, private readonly readModels: () => MemoryModelsSettings,
+    private readonly contextConfig: Config) {}
 
-  /** @returns Detached latest safe outcome; diagnostics exclude dialogue and credentials. */
+  /** Read the last appraisal result without exposing dialogue or credentials.
+   * @returns Detached latest safe outcome, or undefined before an appraisal settles.
+   */
   status(): ReviewOutcome | undefined { return this.outcome === undefined ? undefined : structuredClone(this.outcome) }
 
   /**
@@ -77,21 +82,27 @@ export class LifeEmotionEngine {
         evidence = evidence.filter(item => item === current || item.completed)
         stage = 'storage'
         if (state.events.some(event => event.dedupKey === `emotion-review:${agent.session.id}:${current.startSeq}`)) return
-        const emotion = emotionAt(state.emotion, new Date().toISOString())
+        const now = new Date().toISOString()
+        const emotion = emotionAt(state.emotion, now)
         stage = 'configuration'
         const models = this.readModels()
         const query = current.messages.filter(message => message.role === 'user').map(message => message.text).join(' ')
-        const related = await this.core.retrieve({ text: query, limit: this.config.appraisalMemoryLimit, chars: this.config.appraisalMemoryChars })
-        const traits = await this.core.retrieve({ text: '', category: 'self', limit: this.config.appraisalMemoryLimit, chars: this.config.appraisalMemoryChars })
+        const related = (await this.core.retrieve({ text: query,
+          limit: this.config.appraisalMemoryLimit, chars: this.config.appraisalMemoryChars }))
+          .filter(memory => !isNonDeclarative(memory))
+        const traits = behaviorMemories(state, this.contextConfig, new Date(now))
         const memoryView = (items: typeof related) => items.map(memory => ({ id: memory.id, content: memory.content,
           confidence: memory.confidence, sourceEventIds: memory.sourceEventIds }))
         const goal = this.ctx.get('goals')?.get(agent)
-        const input = { emotion, relatedMemories: memoryView(related), selfMemories: memoryView(traits),
-          goal: goal === undefined ? null : { id: goal.id, objective: goal.objective, phase: goal.phase }, conversation: evidence, newSourceSeqs: current.messages.map(message => message.seq),
-          limits: { maxDelta: settings.maxDelta, maxMoodDelta: settings.maxMoodDelta, maxNeedsDelta: settings.maxNeedsDelta,
-            relationshipEnabled: settings.relationshipEnabled, maxRelationshipDelta: settings.maxRelationshipDelta,
-            moodSupportTurns: settings.moodSupportTurns, importantEventThreshold: settings.importantEventThreshold,
-            repetitionDiscount: settings.repetitionDiscount } }
+        const input = { emotion, relatedMemories: memoryView(related), selfMemories: traits.map(memory => ({
+          ...behaviorReading(memory, state, new Date(now), this.contextConfig.timeZone),
+          id: memory.id, sourceEventIds: memory.sourceEventIds })),
+        goal: goal === undefined ? null : { id: goal.id, objective: goal.objective, phase: goal.phase },
+        conversation: evidence, newSourceSeqs: current.messages.map(message => message.seq),
+        limits: { maxDelta: settings.maxDelta, maxMoodDelta: settings.maxMoodDelta, maxNeedsDelta: settings.maxNeedsDelta,
+          relationshipEnabled: settings.relationshipEnabled, maxRelationshipDelta: settings.maxRelationshipDelta,
+          moodSupportTurns: settings.moodSupportTurns, importantEventThreshold: settings.importantEventThreshold,
+          repetitionDiscount: settings.repetitionDiscount } }
         while (input.conversation.length > 1 && JSON.stringify(input).length > this.calls.inputChars) input.conversation.shift()
         stage = 'decision'
         const decision = reviewDecisionSchema.parse(await auxiliaryCall(this.ctx, agent.session,
@@ -102,13 +113,13 @@ export class LifeEmotionEngine {
           const latest = (await this.core.snapshot()).emotion
           if (latest === undefined) throw new GenesisError('invalid-state', 'Emotion state is unavailable. Inspect life storage before continuing.')
           if (!resolveEmotion(this.config, latest).enabled) return false
-          if (latest.revision !== state.emotion!.revision) throw new GenesisError('configuration-conflict', 'Emotion changed during appraisal. Continue with fresh dialogue before applying another update.')
+          if (latest.revision !== state.emotion?.revision) throw new GenesisError('configuration-conflict', 'Emotion changed during appraisal. Continue with fresh dialogue before applying another update.')
           return true
         }
         if (decision.update && !await admitted()) return
         stage = 'writer'
         const update = decision.update ? emotionUpdateSchema.parse(await auxiliaryCall(this.ctx, agent.session,
-          'emotion-writer', EMOTION_WRITER_PROMPT, input, signal, models, this.calls)) : undefined
+          'emotion-writer', `${EMOTION_WRITER_PROMPT}\n${PERSONALITY_GUIDANCE}`, input, signal, models, this.calls)) : undefined
         signal.throwIfAborted()
         if (!await admitted()) return
         stage = 'storage'
@@ -126,6 +137,8 @@ export class LifeEmotionEngine {
     return operation
   }
 
-  /** @returns After remote work is cancelled and all accepted appraisals and writes have settled. */
+  /** Stop new appraisals and drain accepted work before the life owner closes.
+   * @returns After remote work is cancelled and accepted writes have settled.
+   */
   async close(): Promise<void> { this.lifetime.abort(); await this.tail }
 }

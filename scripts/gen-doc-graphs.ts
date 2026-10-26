@@ -108,6 +108,31 @@ const GROUP_ORDER = [
 
 const SERVICE_ROLES: ServiceRole[] = [
   {
+    key: 'genesisAgency', pkg: 'experimental-genesis', title: 'Genesis agency controls', mode: 'core',
+    consumers: ['experimental-genesis'],
+    note: 'Exposes bounded motivation and goal inspection plus explicit operator pause, resume and abandonment actions.',
+  },
+  {
+    key: 'genesisDeliberation', pkg: 'experimental-genesis', title: 'Genesis deliberation', mode: 'core',
+    consumers: ['experimental-genesis'],
+    note: 'Records sourced life-wide choices and admits only verified accepted work through the existing Agent execution path.',
+  },
+  {
+    key: 'genesisInitiative', pkg: 'experimental-genesis', title: 'Genesis proactive interaction', mode: 'core',
+    consumers: ['experimental-genesis'],
+    note: 'Schedules bounded speak-or-wait opportunities and reconciles delivery from persisted receipts.',
+  },
+  {
+    key: 'genesisMemory', pkg: 'experimental-genesis', title: 'Genesis memory controls', mode: 'core',
+    consumers: ['experimental-genesis'],
+    note: 'Provides sourced memory search and explicit memory editing, personality inspection and lifecycle controls.',
+  },
+  {
+    key: 'genesisRecords', pkg: 'experimental-genesis', title: 'Genesis writing records', mode: 'core',
+    consumers: ['experimental-genesis'],
+    note: 'Owns bounded operator-authored writing records and their independent persistent storage.',
+  },
+  {
     key: 'genesis', pkg: 'experimental-genesis', title: 'Persistent Genesis life', mode: 'core',
     consumers: ['experimental-genesis'],
     note: 'Owns one durable life, sourced memory, observed growth and local backups; the optional memory pipeline adds independent updates and semantic recall.',

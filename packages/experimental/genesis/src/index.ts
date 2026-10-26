@@ -16,6 +16,7 @@ import { interestProjection } from './interest-projection.ts'
 import { LifeInterestEngine, INTEREST_GUIDANCE } from './interest.ts'
 import { LifeCore } from './core.ts'
 import { GUIDANCE, selfContext } from './context.ts'
+import { PERSONALITY_GUIDANCE } from './personality.ts'
 import { lifeRecordsDomain, lifeDomain } from './model.ts'
 import { statusFailure } from './status-error.ts'
 import { GenesisError } from './error.ts'
@@ -96,7 +97,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   if (config.interest !== undefined && config.memory === undefined) {
     throw new GenesisError('invalid-state', 'Interest requires the independent memory writer route. Configure memory before enabling interest.')
   }
-  if (config.emotion !== undefined) emotionSettingsSchema.parse(resolveEmotion(config.emotion, initialEmotion(config.emotion, new Date().toISOString())))
+  if (config.emotion !== undefined) {
+    emotionSettingsSchema.parse(resolveEmotion(config.emotion, initialEmotion(config.emotion, new Date().toISOString())))
+  }
   backupPath(config.leasePath, config.backupPath)
   const release = await acquireLease(config.leasePath)
   let core: LifeCore
@@ -147,7 +150,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   let social: SocialInitiative | undefined
   if (config.socialInitiative !== undefined && deliberation !== undefined) {
     ctx.effect(() => ctx.sessionProjections.register(initiativeProjection))
-    social = new SocialInitiative(ctx, core, deliberation, config.socialInitiative, agent => config.awakening === undefined || lifeMode(agent))
+    social = new SocialInitiative(ctx, core, deliberation, config.socialInitiative,
+      agent => config.awakening === undefined || lifeMode(agent))
     const engine = social
     ctx.provide('genesisInitiative', engine)
     ctx.effect(() => () => engine.close())
@@ -156,7 +160,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     ctx.on('agent/status', ({ status }) => {
       if (status === 'idle') void engine.resume().catch(error => ctx.logger.warn(`Genesis proactive delivery remains pending: ${statusFailure(error).message}`))
     }, { global: true })
-    ctx.tools.guard(exec => {
+    ctx.tools.guard((exec) => {
       if (exec.agent === undefined) return undefined
       const receipt = ctx.sessionProjections.stateOf(exec.agent.session, 'genesisInitiative')
       return receipt?.id !== null && receipt?.id !== undefined && !receipt.ended
@@ -180,7 +184,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   if (config.emotion !== undefined && config.memory !== undefined) {
     const projection = emotionProjection(MAX_EMOTION_WINDOW_TURNS, config.memory.inputChars)
     ctx.effect(() => ctx.sessionProjections.register(projection))
-    emotion = new LifeEmotionEngine(ctx, core, config.emotion, config.memory, () => models.read().models)
+    emotion = new LifeEmotionEngine(ctx, core, config.emotion, config.memory, () => models.read().models, config)
     const engine = emotion
     ctx.effect(() => () => engine.close())
     ctx.on('agent/turn-stopping', async ({ agent, turn, signal }) => {
@@ -190,9 +194,11 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     }, { global: true })
   }
   let interest: LifeInterestEngine | undefined
-  if (config.interest !== undefined && config.memory !== undefined) {
-    ctx.effect(() => ctx.sessionProjections.register(interestProjection(config.interest!.windowTurns, config.memory!.inputChars)))
-    interest = new LifeInterestEngine(ctx, core, config.interest, config.memory, () => models.read().models)
+  const interestConfig = config.interest
+  const memoryConfig = config.memory
+  if (interestConfig !== undefined && memoryConfig !== undefined) {
+    ctx.effect(() => ctx.sessionProjections.register(interestProjection(interestConfig.windowTurns, memoryConfig.inputChars)))
+    interest = new LifeInterestEngine(ctx, core, interestConfig, memoryConfig, () => models.read().models)
     const engine = interest
     ctx.effect(() => () => engine.close())
     ctx.on('agent/turn-stopping', async ({ agent, turn, signal }) => {
@@ -215,10 +221,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   await ctx.plugin(GenesisStatusGateway, { config, preferences, models, memory, emotion, interest, lifeMode })
   const contexts = new Map<object, string>()
   const associations = new Map<object, string>()
-  const refresh = async (agent: Agent, query: string) => {
+  const refresh = async (agent: Agent) => {
     await core.scan(agent.session.id, ctx.tools.schemas(agent))
-    const agency = await agencyContext(core, config)
-    contexts.set(agent, (await selfContext(core, agent, query, config, lifeMode(agent), associations.get(agent) ?? ''))
+    const agency = await agencyContext(core, config, false)
+    contexts.set(agent, (await selfContext(core, agent, config, lifeMode(agent), associations.get(agent) ?? ''))
       + (agency ? `\nCurrent life motivations and goals: ${agency}` : ''))
   }
   const replied = new Set<SessionId>()
@@ -232,17 +238,17 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     text: `${MEMORY_GUIDANCE}\n${PARTICIPANT_GUIDANCE}` })
   if (emotion !== undefined) ctx.systemPrompt.section({ name: 'genesis:emotion', order: 652, interpolate: false, text: EMOTION_GUIDANCE })
   if (interest !== undefined) ctx.systemPrompt.section({ name: 'genesis:interest', order: 653, interpolate: false, text: INTEREST_GUIDANCE })
-  ctx.systemPrompt.section({ name: 'genesis:guidance', order: 650, text: GUIDANCE + (deliberation === undefined ? '' : `\n${DELIBERATION_GUIDANCE}`), interpolate: false })
+  ctx.systemPrompt.section({ name: 'genesis:guidance', order: 650, text: `${GUIDANCE}\n${PERSONALITY_GUIDANCE}` + (deliberation === undefined ? '' : `\n${DELIBERATION_GUIDANCE}`), interpolate: false })
   ctx.systemPrompt.context({ name: 'genesis:self', order: 130, interpolate: false, required: true,
     text: ({ scope }) => scope === undefined ? '' : contexts.get(scope) ?? '' })
   ctx.on('agent/created', async ({ agent, source }) => {
     await core.bind(agent.session.id, source)
-    await refresh(agent, '')
+    await refresh(agent)
   }, { global: true })
   ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
     const assembled = await next()
     if (lifeMode(context.agent)) {
-      assembled.sections = [{ name: 'genesis:character', text: `${LIFE_GUIDANCE}\n${PARTICIPANT_GUIDANCE}`
+      assembled.sections = [{ name: 'genesis:character', text: `${LIFE_GUIDANCE}\n${PERSONALITY_GUIDANCE}\n${PARTICIPANT_GUIDANCE}`
         + (config.emotion === undefined ? '' : `\n${EMOTION_GUIDANCE}`)
         + (config.interest === undefined ? '' : `\n${INTEREST_GUIDANCE}`)
         + (deliberation === undefined ? '' : `\n${DELIBERATION_GUIDANCE}`), interpolate: false }]
@@ -254,13 +260,13 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       assembled.contexts = assembled.contexts.filter(section => section.name === 'genesis:self')
     }
     if (context.agent !== undefined) {
-      await refresh(context.agent, '')
+      await refresh(context.agent)
       const section = assembled.contexts.find(candidate => candidate.name === 'genesis:self')
       if (section !== undefined) section.text = contexts.get(context.agent) ?? ''
     }
     return assembled
   }, { global: true })
-  ctx.on('agent/pre-step', async ({ agent, messages, signal }, next) => {
+  ctx.on('agent/pre-step', async ({ agent, signal }, next) => {
     if (lifeMode(agent) && !core.learningStatus().ready) {
       throw new GenesisError('invalid-state', 'Complete API configuration or account sign-in, then name this life before chatting.')
     }
@@ -277,8 +283,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const text = actualUsers.flatMap(message => message.content).filter(block => block.type === 'text').map(block => block.text).join(' ')
       associations.set(agent, await memory.associate(text, signal))
     }
-    await refresh(agent, (decision.kind === 'enter' ? decision.messages : messages).flatMap(message => message.content)
-      .filter(block => block.type === 'text').map(block => block.text).join(' '))
+    await refresh(agent)
     return decision
   }, { global: true })
   ctx.on('agent/disposed', ({ agent }) => {
@@ -334,6 +339,6 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }, { global: true })
   for (const agent of ctx.agents.list()) {
     await core.bind(agent.session.id, 'plugin-enabled')
-    await refresh(agent, '')
+    await refresh(agent)
   }
 }

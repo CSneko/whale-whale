@@ -42,13 +42,14 @@ A positive decision invokes the writer with state, memories, goal, dialogue and 
 
 The runtime validates sources, schema, per-field limits and captured revision before atomic publication. Immediate changes default to at most 0.25, mood to 0.04 and relationships to 0.01. Mood requires importance at least 0.8 or three distinct recent user fingerprints with the same event kind and relationship meaning. Repeated meanings receive a 0.5 multiplier per match by default; exact repeated evidence applies no new deltas. Replay markers prevent a source exchange from committing twice.
 
-The next admitted request receives quantized state, advisory priorities and the latest attributed interpretation through logged `genesis:self` context. Exploration, creation, contact and independent-choice priorities guide choices among already permitted actions; fear informs caution. This supports willingness, negotiation and goal prioritization during an ordinary model turn. It does not schedule a turn, create autonomous goals or authorize execution. Operator instructions, stop controls, budgets and permission checks remain binding.
+The next admitted request receives direct percentage statements through logged `genesis:self` context, without storage IDs, timestamps or raw appraisal records. The highest-intensity feeling, signed mood valence or loneliness estimate and leading advisory action inclination appear first. Remaining feelings and inclinations follow by descending intensity; relationship estimates retain confidence and attribution. Display values remain quantized by `contextStep`; storage and independent appraisal inputs keep their original numeric scales. Exploration, creation, contact and independent-choice priorities guide choices among already permitted actions; fear informs caution. This supports willingness, negotiation and goal prioritization during an ordinary model turn. It does not schedule a turn, create autonomous goals or authorize execution. Operator instructions, stop controls, budgets and permission checks remain binding.
 
 ## Operator relationship and management
 
 One optional operator relationship retains its own branded ID and five independent estimates: affection, trust, attachment, familiarity and felt security, with per-field confidence and origin. Names merely mentioned in dialogue never create relationships. Relationship estimates do not decay across time or Sessions; ordinary separation cannot reduce them, and appraisal cannot reduce familiarity. Attachment permits independent exploration and disagreement.
 
 <a id="operator-management"></a>
+
 Settings → Emotion shows all three layers, the latest appraisal and bounded attributed history. Valence meters and editors support negative values. Manual adjustments require a reason and include all three layers. Settings edit limits, sensitivity, mood baseline and recovery durations. Saved operator policy overrides deployment defaults; changing parameters first recovers under the old rules. Stale writes preserve drafts and require an explicit reload. Settings → Relationship edits estimates separately.
 
 ## Persistence and failure

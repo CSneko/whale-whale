@@ -18,11 +18,11 @@
   en: bfd566eb11c15178
   zh: 767bc74bd2ee1cca
 /deepseek-ai-dsh-experimental-genesis/configuration:
-  en: 1583f42a8e33721f
-  zh: f8c0671bb09e727c
+  en: 41ccc57504d71962
+  zh: 7a1991d70c34a8de
 /deepseek-ai-dsh-experimental-genesis/implementation:
-  en: 98a569d7adea62b7
-  zh: 4d76a35f83b8b331
+  en: 9edc9633528b244a
+  zh: 82145fcb104d1acf
 /deepseek-ai-dsh-experimental-genesis/further-exploration:
   en: b23c2c9b91f5c429
   zh: 995a9538700c1c85
@@ -33,8 +33,8 @@
   en: c49eb9fdd8cada39
   zh: 0201ccf8a185d623
 /deepseek-ai-dsh-experimental-genesis/model-experience/identity-guidance/what-the-model-sees:
-  en: e624490a6fe9899c
-  zh: c9ee23f185e62688
+  en: 329a3aa8d94f04b4
+  zh: 84587db2aa95cad8
 /deepseek-ai-dsh-experimental-genesis/model-experience/identity-guidance/what-the-model-sees/verbatim-guidance:
   en: ee8865eda3bcc252
   zh: ab62c488b81a55dc
@@ -48,8 +48,8 @@
   en: e0bca4eef1d3efa1
   zh: 33ed6a6ada97820a
 /deepseek-ai-dsh-experimental-genesis/model-experience/long-term-memory/what-the-model-sees:
-  en: 1ddaebe0c7af1573
-  zh: 94c394322fdf6809
+  en: b4c279e3f1661cf5
+  zh: 08638d2d20a3a104
 /deepseek-ai-dsh-experimental-genesis/model-experience/long-term-memory/what-the-model-sees/verbatim-guidance:
   en: ee8865eda3bcc252
   zh: ab62c488b81a55dc
@@ -59,18 +59,33 @@
 /deepseek-ai-dsh-experimental-genesis/model-experience/long-term-memory/kv-cache-effect:
   en: 087b0d2512ad4da6
   zh: 7d3388faf0debf7c
+/deepseek-ai-dsh-experimental-genesis/model-experience/personality-and-speaking-habits:
+  en: 7f25034fc008f48a
+  zh: 6a5380a1f136befa
+/deepseek-ai-dsh-experimental-genesis/model-experience/personality-and-speaking-habits/what-the-model-sees:
+  en: 45efaefe1fc71ca3
+  zh: a6356d6868c7cb3d
+/deepseek-ai-dsh-experimental-genesis/model-experience/personality-and-speaking-habits/what-the-model-sees/verbatim-guidance:
+  en: ee8865eda3bcc252
+  zh: ab62c488b81a55dc
+/deepseek-ai-dsh-experimental-genesis/model-experience/personality-and-speaking-habits/token-effect:
+  en: 98499d4efb8ce0db
+  zh: f1005a9002c05f92
+/deepseek-ai-dsh-experimental-genesis/model-experience/personality-and-speaking-habits/kv-cache-effect:
+  en: 228a651e0bf5332a
+  zh: 9ad0de1be34724a5
 /deepseek-ai-dsh-experimental-genesis/model-experience/emotion:
   en: fef347dd4d79aa30
   zh: 25bd27b622ba0ed7
 /deepseek-ai-dsh-experimental-genesis/model-experience/emotion/what-the-model-sees:
-  en: bd4d395687003330
-  zh: debc0e7c157e5f13
+  en: 5ce7a81511e83b10
+  zh: d68fa7d364a81e79
 /deepseek-ai-dsh-experimental-genesis/model-experience/emotion/what-the-model-sees/verbatim-guidance:
   en: ee8865eda3bcc252
   zh: ab62c488b81a55dc
 /deepseek-ai-dsh-experimental-genesis/model-experience/emotion/token-effect:
-  en: 46e82ab38c27d785
-  zh: ae5c8def9ffc57a1
+  en: 640c0efbdd3a6d11
+  zh: 117df7a491d5a2b0
 /deepseek-ai-dsh-experimental-genesis/model-experience/emotion/kv-cache-effect:
   en: 159bd25c759470a1
   zh: db0b56f00ca57dae
@@ -93,8 +108,8 @@
   en: 0bbba9d6552a779c
   zh: 530d9ecd4d502066
 /deepseek-ai-dsh-experimental-genesis/model-experience/motivation-and-decisions/what-the-model-sees:
-  en: f9027168388bb2c1
-  zh: 5aff8a95f6a523b4
+  en: a7d960084d52cba7
+  zh: 3fa50b21d7d48602
 /deepseek-ai-dsh-experimental-genesis/model-experience/motivation-and-decisions/token-effect:
   en: 0b61bdd068a71e02
   zh: 9f5aa01577c344a6
@@ -129,8 +144,8 @@
   en: f3cdc177843abe39
   zh: 43780d7b8cf88c94
 /deepseek-ai-dsh-experimental-genesis/known-limitations-and-deferred-work:
-  en: bdbf42cd0802c1d1
-  zh: 833e276559a1b2dc
+  en: 09c30fe649b6edf7
+  zh: 090a77aab532b04d
 /deepseek-ai-dsh-experimental-genesis/known-limitations-and-deferred-work/dev-note:
   en: 0a1253c6f7b5e8b9
   zh: 9f56528562c7c914

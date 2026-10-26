@@ -9,6 +9,15 @@
 
 ```mermaid
 flowchart LR
+  pkg_experimental_genesis["experimental-genesis"]
+  svc_genesisAgency["ctx.genesisAgency<br/>Genesis agency controls"]
+  svc_genesisDeliberation["ctx.genesisDeliberation<br/>Genesis deliberation"]
+  svc_genesisInitiative["ctx.genesisInitiative<br/>Genesis proactive interaction"]
+  svc_genesisMemory["ctx.genesisMemory<br/>Genesis memory controls"]
+  svc_genesisRecords["ctx.genesisRecords<br/>Genesis writing records"]
+  svc_genesis["ctx.genesis<br/>Persistent Genesis life"]
+  svc_genesisStatus["ctx.genesisStatus<br/>Genesis status projection"]
+  pkg_experimental_client_ui_genesis["experimental-client-ui-genesis"]
   pkg_experimental_client_ui_cot_translation["experimental-client-ui-cot-translation"]
   svc_cotTranslation["ctx.cotTranslation<br/>Reasoning translation Remote"]
   pkg_experimental_translator["experimental-translator"]
@@ -347,6 +356,13 @@ flowchart LR
   pkg_experimental_client_ui_cot_translation --> svc_cotTranslation
   pkg_experimental_computer_use_cua_driver_mcp --> svc_computerUse
   pkg_experimental_computer_use_cua_driver_native --> svc_computerUse
+  pkg_experimental_genesis --> svc_genesis
+  pkg_experimental_genesis --> svc_genesisAgency
+  pkg_experimental_genesis --> svc_genesisDeliberation
+  pkg_experimental_genesis --> svc_genesisInitiative
+  pkg_experimental_genesis --> svc_genesisMemory
+  pkg_experimental_genesis --> svc_genesisRecords
+  pkg_experimental_genesis --> svc_genesisStatus
   pkg_experimental_ptc_runtime_python --> svc_ptcRuntime
   pkg_experimental_speech_to_text --> svc_speechToText
   pkg_experimental_speech_to_text_sensevoice --> svc_speechToText
@@ -492,6 +508,13 @@ flowchart LR
   svc_fileReferences --> pkg_api_session_controller
   svc_fileUploads --> pkg_api_session_controller
   svc_fs --> pkg_tool_fs
+  svc_genesis --> pkg_experimental_genesis
+  svc_genesisAgency --> pkg_experimental_genesis
+  svc_genesisDeliberation --> pkg_experimental_genesis
+  svc_genesisInitiative --> pkg_experimental_genesis
+  svc_genesisMemory --> pkg_experimental_genesis
+  svc_genesisRecords --> pkg_experimental_genesis
+  svc_genesisStatus --> pkg_experimental_client_ui_genesis
   svc_hmr --> pkg_app_boot
   svc_jobs --> pkg_api_job_controller
   svc_jobs --> pkg_tool_bash
@@ -613,6 +636,13 @@ flowchart LR
 
 | ctx 键 | 角色 | 所属包 | 实现 | 直接消费方 | 配套插件 | 说明 |
 | --- | --- | --- | --- | --- | --- | --- |
+| `ctx.genesisAgency` | `core` | [`experimental-genesis`](../packages/experimental/genesis) | - | [`experimental-genesis`](../packages/experimental/genesis) | - | 提供有界动机和目标查询，以及操作者显式暂停、恢复和放弃目标的操作。 |
+| `ctx.genesisDeliberation` | `core` | [`experimental-genesis`](../packages/experimental/genesis) | - | [`experimental-genesis`](../packages/experimental/genesis) | - | 记录带来源的生命选择，并通过现有 Agent 执行路径准入已核实接受的任务。 |
+| `ctx.genesisInitiative` | `core` | [`experimental-genesis`](../packages/experimental/genesis) | - | [`experimental-genesis`](../packages/experimental/genesis) | - | 安排有界的发言或等待机会，并根据持久化回执协调投递。 |
+| `ctx.genesisMemory` | `core` | [`experimental-genesis`](../packages/experimental/genesis) | - | [`experimental-genesis`](../packages/experimental/genesis) | - | 提供带来源的记忆搜索、显式记忆编辑、人格查询和生命周期控制。 |
+| `ctx.genesisRecords` | `core` | [`experimental-genesis`](../packages/experimental/genesis) | - | [`experimental-genesis`](../packages/experimental/genesis) | - | 管理有界的操作者撰写记录及其独立持久化存储。 |
+| `ctx.genesis` | `core` | [`experimental-genesis`](../packages/experimental/genesis) | - | [`experimental-genesis`](../packages/experimental/genesis) | - | 管理单一持久生命、有来源记忆、已观察成长和本地备份；可选记忆流程增加独立更新与语义检索。 |
+| `ctx.genesisStatus` | `core` | [`experimental-genesis`](../packages/experimental/genesis) | - | [`experimental-client-ui-genesis`](../packages/experimental/client-ui-genesis) | - | 为已认证的实验性 Web 设置功能提供有界生命状态和记忆预览。 |
 | `ctx.cotTranslation` | `service` | [`experimental-client-ui-cot-translation`](../packages/experimental/client-ui-cot-translation) | - | - | - | 为展开的思考内容提供有界的 Session 翻译请求，不改变模型可见历史。 |
 | `ctx.translator` | `service` | [`experimental-translator`](../packages/experimental/translator) | - | [`experimental-client-ui-cot-translation`](../packages/experimental/client-ui-cot-translation) | - | 解析 Google 或 Bing 请求，并可选保留统一的实验性 Session 记录。 |
 | `ctx.hmr` | `core` | [`hmr`](../packages/boot/hmr) | - | [`app-boot`](../packages/boot/app-boot) | - | 负责模块和精确配置监听；应用修改共用其队列，自动重载等待应用文件锁。 |

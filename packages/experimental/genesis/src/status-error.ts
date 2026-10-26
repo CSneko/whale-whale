@@ -35,11 +35,15 @@ export function statusFailure(error: unknown): RemoteFailure {
       'appraisal', 'novelty', 'expectationMatch', 'controllability', 'relationshipMeaning', 'responsibility', 'summary',
       'relationshipDelta', 'affection', 'trust', 'attachment', 'familiarity', 'feltSecurity', 'label',
       'relationshipEnabled', 'maxRelationshipDelta', 'moodSupportTurns', 'importantEventThreshold', 'repetitionDiscount', 'maxNeedsDelta', 'needsHalfLifeMs', 'interactionHalfLifeMs', 'socialDesire', 'socialSatisfaction', 'relationshipQuality', 'recentInteraction', 'solitudePreference', 'exploration', 'autonomy', 'creativity', 'loneliness',
-      'changes', 'action', 'sourceSeqs', 'memory', 'category', 'importance', 'confidence', 'attribution'])
+      'changes', 'action', 'sourceSeqs', 'memory', 'category', 'importance', 'confidence', 'attribution',
+      'motivations', 'goals', 'candidates', 'selected', 'factors', 'disposition', 'strength', 'status', 'origin', 'priority',
+      'interestIds', 'memoryIds', 'sourceEventIds', 'motivationIds', 'goalIds', 'nextAction', 'failures', 'createdAt', 'updatedAt',
+      'motivation', 'interest', 'commitment', 'benefit', 'cost', 'risk', 'urgency', 'relationship', 'context'])
     message = error.issues.slice(0, 8).map((issue) => {
       const path = issue.path.filter(part => typeof part === 'number' || fields.has(String(part))).join('.') || 'configuration/response'
       const bound = 'minimum' in issue ? `; minimum=${String(issue.minimum)}` : 'maximum' in issue ? `; maximum=${String(issue.maximum)}` : ''
-      return `${path}: ${issue.code}${bound}`
+      const keys = issue.code === 'unrecognized_keys' ? issue.keys.filter(key => fields.has(key)).slice(0, 8) : []
+      return `${path}: ${issue.code}${bound}${keys.length ? `; fields=${keys.join(',')}` : ''}`
     }).join('; ')
   } else if (error instanceof HarnessError) {
     reason = error.code

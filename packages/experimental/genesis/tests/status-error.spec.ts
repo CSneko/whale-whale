@@ -30,3 +30,14 @@ it('exposes transport cause codes and timeout separately from the fetch wrapper'
   })).message).toContain('EACCES')
   expect(statusFailure(new SyntaxError('private malformed JSON')).message).toContain('invalid JSON')
 })
+
+it('names deliberation fields while withholding unknown keys and response values', () => {
+  const result = z.object({ goals: z.array(z.strictObject({ priority: z.number().max(1) })) })
+    .safeParse({ goals: [{ priority: 2, createdAt: 'private-value', 'private-secret': true }] })
+  if (result.success) throw new Error('Expected invalid fixture')
+  const failure = statusFailure(result.error)
+  expect(failure.message).toContain('goals.0.priority: too_big; maximum=1')
+  expect(failure.message).toContain('goals.0: unrecognized_keys; fields=createdAt')
+  expect(failure.message).not.toContain('private-value')
+  expect(failure.message).not.toContain('private-secret')
+})

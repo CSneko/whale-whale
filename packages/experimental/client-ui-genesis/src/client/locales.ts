@@ -1,5 +1,13 @@
 /** Typed English and Chinese copy owned by the Genesis settings view. @module */
 export const en = {
+  personalityTitle: 'Personality and speaking style',
+  personalityDescription: 'Enduring tendencies shape how she interprets events, makes choices and speaks. Emotion and the current conversation can change how they are expressed.',
+  personalityTendencies: 'Personality tendencies', personalityStyle: 'Speaking and behavioral habits',
+  personalityAdd: 'Add a personality tendency', personalityAddStyle: 'Add a speaking habit',
+  personalityEdit: 'Edit personality tendency', personalityEditStyle: 'Edit speaking habit',
+  personalityEmpty: 'No tendencies in this group yet. You can add one or teach her through conversation.',
+  personalityLearningHint: 'Saved changes apply across conversations. Requests such as “be brief this time” stay in the current conversation; lasting teaching and repeated feedback can shape habits.',
+
   agencyTitle: 'Motivation and goals', agencyDescription: 'Experience-derived inclinations, persistent life goals and explained choices. Willingness never grants execution permission.',
   agencyDisabled: 'Deliberation is disabled. Existing history is retained; enable deliberation to use these controls.',
   agencyDeliberate: 'Autonomous deliberation', agencyDeliberateHint: 'Choose an idle Life conversation. She may continue or propose a goal, ask for help, or wait. An accepted choice can execute tools under existing permissions.',
@@ -203,6 +211,14 @@ export const en = {
 export type GenesisKey = keyof typeof en
 /** Simplified Chinese counterpart of the English dictionary. */
 export const zh: Record<GenesisKey, string> = {
+  personalityTitle: '性格与说话风格',
+  personalityDescription: '长期倾向影响她如何理解事件、作出选择和说话。情绪与当前交流会调节这些倾向的表现。',
+  personalityTendencies: '性格倾向', personalityStyle: '说话与行为习惯',
+  personalityAdd: '添加性格倾向', personalityAddStyle: '添加说话习惯',
+  personalityEdit: '编辑性格倾向', personalityEditStyle: '编辑说话习惯',
+  personalityEmpty: '这一组还没有倾向。你可以添加，也可以在交流中教她。',
+  personalityLearningHint: '保存的修改会跨会话延续。“这次简短一点”仅适用于当前交流；长期教学和反复反馈可以塑造习惯。',
+
   agencyTitle: '动机与目标', agencyDescription: '展示从经历形成的意愿、跨会话生命目标和有依据的选择；行动意愿不授予执行权限',
   agencyDisabled: '尚未启用审议，已有历史仍保留；启用 deliberation 后可使用操作入口',
   agencyDeliberate: '自主审议', agencyDeliberateHint: '选择一个空闲的 Life 会话，她可以继续或提出目标、请求协助或等待；接受行动后可能在既有权限内执行工具',

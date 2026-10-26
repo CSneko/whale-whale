@@ -73,7 +73,15 @@ export interface EmotionHistoryEntry {
   relationship?: RelationshipState | null
   targets?: Partial<Record<keyof EmotionCurrent, string>> | undefined
   appraisal?: EmotionAppraisal
-  effects?: { needs?: Record<string, number> | undefined; current: Record<string, number>; mood: Record<string, number>; relationship: Record<string, number>; repetitionFactor: number; moodEligible: boolean; repeated: boolean }
+  effects?: {
+    needs?: Record<string, number> | undefined
+    current: Record<string, number>
+    mood: Record<string, number>
+    relationship: Record<string, number>
+    repetitionFactor: number
+    moodEligible: boolean
+    repeated: boolean
+  }
   mood: Mood
   needs: Needs
   sourceEventIds: LifeEventId[]
@@ -95,6 +103,13 @@ export interface InterestHistoryEntry {
   sourceEventIds: LifeEventId[]
 }
 
+/** Bounded personality and expression records, selected before unrelated memory previews. */
+export interface PersonalityStatus {
+  /** Current self and procedural non-declarative records, including clearly marked retired habits. */
+  entries: LifeMemory[]
+  /** Matching records omitted by the item or complete-response budget. */
+  omitted: number
+}
 /** A sampled view; historical Session observations never become current availability. */
 export interface LifeStatus {
   /** Explicit human-authored participant identity; zero revision denotes unset identity. */
@@ -104,7 +119,13 @@ export interface LifeStatus {
   /** Recovered simulated emotion and latest live appraisal diagnostic; absent when disabled. */
   emotion?: EmotionState & { settings: EmotionSettings; history: EmotionHistoryEntry[]; omitted: number; review?: ReviewOutcome }
   /** Sourced interest interpretations and bounded append-only transitions. */
-  interest?: { entries: InterestSummary[]; omitted: number; history: InterestHistoryEntry[]; historyOmitted: number; review?: ReviewOutcome }
+  interest?: {
+    entries: InterestSummary[]
+    omitted: number
+    history: InterestHistoryEntry[]
+    historyOmitted: number
+    review?: ReviewOutcome
+  }
   /** Independent routes, revision and credential availability; never credential values. */
   models?: MemoryModelsSettings & { revision: number; keys: Record<'decision' | 'writer', { configured: boolean; writable: boolean }> }
   /** Persistent maintenance cursor, effective preference and bounded automatic retry state. */

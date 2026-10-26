@@ -23,10 +23,12 @@ export class SocialInitiative {
   constructor(private readonly ctx: Context, private readonly core: LifeCore, private readonly decisions: LifeDeliberationEngine,
     private readonly policy: SocialInitiativeConfig, private readonly applies: (agent: Agent) => boolean) {}
 
-  /** @returns After durable initialization and subscription; no immediate unsolicited message is forced. */
+  /** Subscribe to life events and arm the configured proactive checks.
+   * @returns After durable initialization and subscription; no immediate unsolicited message is forced.
+   */
   async start(): Promise<void> {
     await this.core.initializeInitiative()
-    this.unsubscribe = this.core.onCommitted(events => {
+    this.unsubscribe = this.core.onCommitted((events) => {
       const relevant = events.filter(event => ['goal.completed', 'goal.changed', 'memory.created', 'memory.updated'].includes(event.type))
       if (relevant.length) this.background(this.checkEvents(relevant))
     })
@@ -163,7 +165,8 @@ export class SocialInitiative {
 
   /**
    * Admit only an outstanding attributed notice, rechecking limits and giving real user input priority.
-   * @param agent - Actual receiving conversation. @param messages - Proposed next-step inputs.
+   * @param agent - Actual receiving conversation.
+   * @param messages - Proposed next-step inputs.
    * @returns Inputs with any unsafe, canceled or already-settled initiative removed.
    */
   async admit(agent: Agent, messages: UserMessage[]): Promise<UserMessage[]> {
@@ -222,7 +225,9 @@ export class SocialInitiative {
     }
   }
 
-  /** @returns After timers stop and every accepted operation drains; queued notices require active plugin admission. */
+  /** Stop proactive checks and drain accepted work.
+   * @returns After timers stop and every accepted operation drains; queued notices require active plugin admission.
+   */
   async close(): Promise<void> {
     this.lifetime.abort()
     if (this.timer !== undefined) clearTimeout(this.timer)
