@@ -1,8 +1,29 @@
 /** Deployment-owned storage exclusion and context limits. @module */
 import z from '@deepseek-ai/schemastery'
 import type { Mood, EmotionHalfLives, MoodHalfLives, Needs } from './emotion-state.ts'
+/** Optional proactive conversation policy; durations are milliseconds. */
+export interface SocialInitiativeConfig {
+  /** Explicit conversation; absent selects the latest live character conversation with real user activity. */
+  sessionId?: string
+  /** Period between decision opportunities while the process runs. */
+  intervalMs: number
+  /** Minimum time between proactive messages. */
+  minSendIntervalMs: number
+  /** Maximum proactive messages in a rolling twenty-four hours. */
+  maxPer24Hours: number
+  /** Required quiet time after the latest real user message. */
+  userIdleMs: number
+  /** Memory importance required for discovery or thought triggers. */
+  eventImportance: number
+  /** Maximum unresolved opportunities. */
+  maxPending: number
+  /** Pending opportunities expire rather than sending stale messages. */
+  maxPendingAgeMs: number
+}
 /** Validated, resolved Genesis plugin configuration. */
 export interface Config {
+  /** Lightweight proactive conversation; requires deliberation and memory. */
+  socialInitiative?: SocialInitiativeConfig | undefined
   /** Calendar zone for memory anchors and relative recall; defaults to the host's IANA zone. */
   timeZone: string
   /** Enables naming, newborn conversations and persistent tool learning on the configured chat route. */
@@ -223,7 +244,16 @@ const initialNeeds = z.object({ socialDesire: z.number().min(0).max(1).default(0
   solitudePreference: z.number().min(0).max(1).default(0.5), exploration: z.number().min(0).max(1).default(0.5),
   autonomy: z.number().min(0).max(1).default(0.5), creativity: z.number().min(0).max(1).default(0.5), loneliness: z.number().min(0).max(1).default(0) })
 /** Loader schema resolves every deployment-varying bound before plugin activation. */
-export const Config: z<Partial<Omit<Config, 'emotion' | 'interest' | 'records' | 'deliberation'>> & Pick<Config, 'leasePath'> & { emotion?: Partial<EmotionConfig> | undefined; interest?: Partial<InterestConfig> | undefined; records?: Partial<RecordsConfig> | undefined; deliberation?: Partial<DeliberationConfig> | undefined }, Config> = z.object({
+export const Config: z<Partial<Omit<Config, 'emotion' | 'interest' | 'records' | 'deliberation' | 'socialInitiative'>> & Pick<Config, 'leasePath'> & { emotion?: Partial<EmotionConfig> | undefined; interest?: Partial<InterestConfig> | undefined; records?: Partial<RecordsConfig> | undefined; deliberation?: Partial<DeliberationConfig> | undefined; socialInitiative?: Partial<SocialInitiativeConfig> | undefined }, Config> = z.object({
+  socialInitiative: z.union([z.const(undefined), z.object({
+    sessionId: z.string(), intervalMs: z.number().step(1).min(1000).max(86400000).default(1800000),
+    minSendIntervalMs: z.number().step(1).min(0).max(86400000).default(1800000),
+    maxPer24Hours: z.number().step(1).min(1).max(100).default(6),
+    userIdleMs: z.number().step(1).min(0).max(86400000).default(60000),
+    eventImportance: z.number().min(0).max(1).default(0.8),
+    maxPending: z.number().step(1).min(1).max(100).default(20),
+    maxPendingAgeMs: z.number().step(1).min(1000).max(604800000).default(86400000),
+  })]),
   awakening: z.union([z.const(undefined), z.object({
     provider: z.string().required(), model: z.string().required(), lifePreset: z.string() })]),
   emotion: z.union([z.const(undefined), z.object({

@@ -1,6 +1,7 @@
 /** Atomic life state, sourced memory retrieval and observed system growth. @module */
 import { applyDeliberation, type DeliberationCommit } from './agency.ts'
 import type { DecisionId, LifeDecision, LifeGoalId } from './agency-state.ts'
+import type { InteractionRecord, InteractionId } from './social-state.ts'
 import { randomUUID, createHash } from 'node:crypto'
 import { z } from 'zod'
 import { brandString } from '@deepseek-ai/dsh-brand'
@@ -97,6 +98,66 @@ function grow(state: LifeState, event: LifeEvent, title: string, description: st
  * validation and capacity refusals leave it usable. Returned data is detached.
  */
 export class LifeCore {
+  private readonly eventListeners = new Set<(events: readonly LifeEvent[]) => void>()
+
+  /**
+   * Subscribe to newly committed life events; listeners must contain their own asynchronous failures.
+   * @param listener - Nonthrowing observer; callbacks must not mutate event values.
+   * @returns Disposer for the subscription.
+   */
+  onCommitted(listener: (events: readonly LifeEvent[]) => void): () => void {
+    this.eventListeners.add(listener)
+    return () => { this.eventListeners.delete(listener) }
+  }
+
+  /** @returns After enabling the optional outbox without replacing prior history. */
+  initializeInitiative(): Promise<void> {
+    return this.change(state => {
+      if (state.initiative !== undefined) return
+      state.initiative = { version: 1, records: [] }
+      fact(state, 'initiative.initialized', 'initiative:initialized', {})
+    })
+  }
+
+  /**
+   * Record one replay-safe opportunity even when no conversation channel is available.
+   * @param key - Stable timer bucket or event identity.
+   * @param sourceEventId - Actual trigger or most recent recorded life event.
+   * @returns Existing or newly pending opportunity; capacity exhaustion remains visible.
+   */
+  requestInteraction(key: string, sourceEventId: LifeEventId): Promise<InteractionRecord> {
+    return this.change(state => {
+      const initiative = state.initiative
+      if (initiative === undefined || this.config.socialInitiative === undefined) throw new GenesisError('invalid-state', 'Social initiative is disabled.')
+      const previous = initiative.records.find(item => item.key === key)
+      if (previous !== undefined) return previous
+      this.checkSources(state, [sourceEventId])
+      if (initiative.records.filter(item => item.status === 'pending' || item.status === 'dispatching').length >= this.config.socialInitiative.maxPending) {
+        throw new GenesisError('capacity', 'Genesis pending interaction queue is full. Inspect pending deliveries before retrying.')
+      }
+      const item: InteractionRecord = { id: brandString<InteractionId>(randomUUID()), key, sourceEventId,
+        status: 'pending', createdAt: new Date().toISOString() }
+      initiative.records.push(item)
+      fact(state, 'initiative.requested', `initiative:${key}`, { interactionId: item.id, sourceEventId })
+      return item
+    })
+  }
+
+  /**
+   * Commit a delivery transition and its reason, content or receipt with the existing atomic life write.
+   * @param record - Engine-owned record derived from the latest life snapshot.
+   * @returns After the transition is durable; terminal receipts cannot be overwritten.
+   */
+  saveInteraction(record: InteractionRecord): Promise<void> {
+    return this.change(state => {
+      const current = state.initiative?.records.find(item => item.id === record.id)
+      if (current === undefined || current.key !== record.key || current.sourceEventId !== record.sourceEventId) throw new GenesisError('invalid-source', 'Interaction opportunity is absent or changed.')
+      if (['sent', 'skipped', 'uncertain'].includes(current.status)) return
+      if (JSON.stringify(current) === JSON.stringify(record)) return
+      Object.assign(current, record)
+      fact(state, 'initiative.changed', `initiative-transition:${randomUUID()}`, { interactionId: record.id, status: record.status })
+    })
+  }
   private committed: LifeState | undefined
   private backedUp: LifeManifest | undefined
   private chain: Promise<void> = Promise.resolve()
@@ -269,7 +330,7 @@ export class LifeCore {
     this.assertUsable()
     const agency = this.state().agency
     const decision = agency?.decisions.find(item => item.id === id)
-    return decision?.outcome.status === 'pending' && decision.candidates[decision.selected]?.disposition === 'accept'
+    return decision?.purpose !== 'interaction' && decision?.outcome.status === 'pending' && decision.candidates[decision.selected]?.disposition === 'accept'
       && decision.goalIds.every(goalId => agency?.goals.some(goal => goal.id === goalId && goal.status === 'active'))
   }
 
@@ -1214,7 +1275,11 @@ export class LifeCore {
       const before = JSON.stringify(state)
       const result = operation(state)
       stateSchema.parse(state)
-      if (JSON.stringify(state) !== before) await this.persist(state)
+      if (JSON.stringify(state) !== before) {
+        const newEvents = state.events.slice(this.state().events.length)
+        await this.persist(state)
+        for (const listener of this.eventListeners) listener(structuredClone(newEvents))
+      }
       return structuredClone(result)
     })
     this.chain = pending.then(() => undefined, (_error: unknown) => {
@@ -1223,7 +1288,7 @@ export class LifeCore {
     return pending
   }
   private async persist(state: LifeState): Promise<void> {
-    const count = state.events.length + state.memories.length
+    const count = state.events.length + state.memories.length + (state.initiative?.records.length ?? 0)
       + (state.agency === undefined ? 0 : state.agency.motivations.length + state.agency.decisions.length
         + state.agency.goals.reduce((total, goal) => total + 1 + goal.history.length, 0))
       + (state.interests?.length ?? 0) + (state.interests?.reduce((total, interest) => total + interest.evidence.length, 0) ?? 0)

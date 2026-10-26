@@ -10,6 +10,7 @@ import { GenesisError } from './error.ts'
 
 /** Evidence captured by the integration before an auxiliary call; not supplied by the model. */
 export interface DeliberationCommit {
+  purpose?: 'interaction'
   key: string
   sessionId: SessionId
   trigger: 'request' | 'event'
@@ -115,7 +116,7 @@ export function applyDeliberation(state: LifeState, commit: DeliberationCommit, 
   if (selected === undefined) throw new GenesisError('invalid-source', 'The selected candidate is absent.')
   const goalIds = selected.goalIds.length ? selected.goalIds : changedGoals.filter(id => agency.goals.some(item => item.id === id && item.status === 'active'))
   const motivationIds = selected.motivationIds.length ? selected.motivationIds : changedMotivations
-  if (selected.disposition === 'accept' && commit.trigger === 'event' && !goalIds.length) {
+  if (selected.disposition === 'accept' && commit.trigger === 'event' && commit.purpose !== 'interaction' && !goalIds.length) {
     throw new GenesisError('invalid-source', 'Autonomous execution requires an active life goal.')
   }
   if (selected.disposition === 'accept' && goalIds.some(id => !agency.goals.some(item => item.id === id && item.status === 'active'))) {
@@ -125,11 +126,13 @@ export function applyDeliberation(state: LifeState, commit: DeliberationCommit, 
     throw new GenesisError('invalid-source', 'A refusal or trade-off needs a recorded goal or motivation, not arbitrary disagreement.')
   }
   const decision: LifeDecision = { id, key: commit.key, sessionId: commit.sessionId, trigger: commit.trigger,
+    ...(commit.purpose === undefined ? {} : { purpose: commit.purpose }),
     sourceEventIds: commit.sourceEventIds, createdAt: now, candidates: plan.candidates, selected: plan.selected,
     reason: plan.reason, goalIds, motivationIds, outcome: { status: selected.disposition === 'wait' ? 'waiting' : 'pending',
       sourceEventIds: [], recordedAt: now } }
   agency.decisions.push(decision)
   agency.revision++
-  record('decision.made', `decision:${id}`, { decision })
+  const { purpose, ...recorded } = decision
+  record('decision.made', `decision:${id}`, { decision: { ...recorded, ...(purpose === undefined ? {} : { purpose }) } })
   return decision
 }

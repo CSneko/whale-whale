@@ -4,6 +4,8 @@ import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import { GenesisAgencyGateway } from './agency-gateway.ts'
+import { SocialInitiative } from './social.ts'
+import { initiativeProjection } from './social-projection.ts'
 import { LifeDeliberationEngine, DELIBERATION_GUIDANCE, agencyContext } from './deliberation.ts'
 import { MemoryConsolidator } from './consolidation.ts'
 import { Config } from './config.ts'
@@ -37,6 +39,8 @@ import { GenesisRecordsGateway } from './records-gateway.ts'
 import { registerWritingTool } from './records-tool.ts'
 
 export { LifeDeliberationEngine } from './deliberation.ts'
+export { SocialInitiative } from './social.ts'
+export type { InteractionId, InteractionRecord } from './social-state.ts'
 export type * from './agency-state.ts'
 export type { DeliberationCommit } from './agency.ts'
 export { Config } from './config.ts'
@@ -58,6 +62,8 @@ declare module '@deepseek-ai/cordis' {
     genesis: LifeCore
     /** Optional trusted autonomous deliberation entry; use ctx.get when optional. */
     genesisDeliberation: LifeDeliberationEngine
+    /** Optional proactive conversation worker; use ctx.get when disabled. */
+    genesisInitiative: SocialInitiative
   }
 }
 /** Loader plugin identifier. */
@@ -72,6 +78,9 @@ export const inject = ['storageDomain', 'tools', 'systemPrompt', 'agents', 'llm'
  * @returns After the life is restored and every registration is available.
  */
 export async function apply(ctx: Context, config: Config): Promise<void> {
+  if (config.socialInitiative !== undefined && (config.deliberation === undefined || config.memory === undefined)) {
+    throw new GenesisError('invalid-state', 'Social initiative requires deliberation and the independent memory writer route.')
+  }
   if (config.records !== undefined && config.personalDirectory === undefined) {
     throw new GenesisError('invalid-state', 'Recording requires personalDirectory. Configure a private personal directory before enabling records.')
   }
@@ -134,6 +143,25 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     ctx.provide('genesisDeliberation', deliberation)
     ctx.effect(() => () => deliberation.close())
     ctx.on('agent/turn-stopping', async ({ agent }) => { await deliberation.settle(agent, false) }, { global: true })
+  }
+  let social: SocialInitiative | undefined
+  if (config.socialInitiative !== undefined && deliberation !== undefined) {
+    ctx.effect(() => ctx.sessionProjections.register(initiativeProjection))
+    social = new SocialInitiative(ctx, core, deliberation, config.socialInitiative, agent => config.awakening === undefined || lifeMode(agent))
+    const engine = social
+    ctx.provide('genesisInitiative', engine)
+    ctx.effect(() => () => engine.close())
+    await engine.start()
+    ctx.on('agent/created', async () => { await engine.resume(); return undefined }, { global: true })
+    ctx.on('agent/status', ({ status }) => {
+      if (status === 'idle') void engine.resume().catch(error => ctx.logger.warn(`Genesis proactive delivery remains pending: ${statusFailure(error).message}`))
+    }, { global: true })
+    ctx.tools.guard(exec => {
+      if (exec.agent === undefined) return undefined
+      const receipt = ctx.sessionProjections.stateOf(exec.agent.session, 'genesisInitiative')
+      return receipt?.id !== null && receipt?.id !== undefined && !receipt.ended
+        ? 'A proactive conversation may send an assistant message but cannot execute task tools.' : undefined
+    })
   }
   const memory = config.memory === undefined ? undefined
     : new LifeMemoryEngine(ctx, core, config, config.memory, () => preferences.read().embedding, () => models.read().models)
@@ -237,6 +265,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       throw new GenesisError('invalid-state', 'Complete API configuration or account sign-in, then name this life before chatting.')
     }
     const decision = await next()
+    if (social !== undefined && decision.kind === 'enter') decision.messages = await social.admit(agent, decision.messages)
     if (lifeMode(agent) && decision.kind === 'enter' && decision.messages.length > 0) {
       await core.beginConversation(agent.session.id)
     }
@@ -264,6 +293,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     calls.delete(agent.session.id)
   }, { global: true })
   ctx.on('session/event', (session, event) => {
+    if (social !== undefined && (event.type === 'assistant/message' || event.type === 'turn/end')) social.observe(session)
     deliberation?.observe(session.id, event)
     if (deliberation !== undefined && event.type === 'turn/end' && event.data.reason.kind !== 'completed') {
       const agent = ctx.agents.list().find(candidate => candidate.session.id === session.id)
