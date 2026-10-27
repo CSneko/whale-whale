@@ -11,18 +11,21 @@ import css from './StatusPanel.module.css'
 
 /**
  * Edit a candidate memory without inventing source references or replacing its identity.
+ * A supplied preset fixes the layer and category and hides score controls; without it all draft fields are editable.
  * @param props - Optional existing version, authenticated save and owning page callbacks.
  * @returns A dismissible editor retaining drafts after rejected writes.
  */
-export function MemoryEditor({ initial, save, saved, close, t }: PropsLocale<'genesis'> & Pick<MemoryActions, 'save'> & {
+export function MemoryEditor({ initial, save, saved, close, t, preset, title }: PropsLocale<'genesis'> & Pick<MemoryActions, 'save'> & {
+  preset?: Pick<MemoryDraft, 'category' | 'kind'> | undefined
+  title?: string | undefined
   initial: LifeMemory | undefined
   saved: (memory: LifeMemory) => void
   close: () => void
 }) {
   const field = useId()
   const [id] = useState(() => initial?.id ?? brandString<MemoryId>(randomUUID()))
-  const [draft, setDraft] = useState<MemoryDraft>(() => ({ content: initial?.content ?? '', category: initial?.category ?? 'semantic',
-    kind: initial?.kind ?? (initial?.category === 'procedural' ? 'non-declarative' : 'declarative'),
+  const [draft, setDraft] = useState<MemoryDraft>(() => ({ content: initial?.content ?? '', category: initial?.category ?? preset?.category ?? 'semantic',
+    kind: initial?.kind ?? preset?.kind ?? (initial?.category === 'procedural' ? 'non-declarative' : 'declarative'),
     importance: initial?.importance ?? 0.5, confidence: initial?.confidence ?? 0.5 }))
   const [pending, setPending] = useState(false)
   const [failure, setFailure] = useState<string>()
@@ -40,12 +43,12 @@ export function MemoryEditor({ initial, save, saved, close, t }: PropsLocale<'ge
       if (!owned.signal.aborted) setFailure(operationFailure(error, [], t('unknownError')))
     }).finally(() => { operation.current = undefined; if (!owned.signal.aborted) setPending(false) })
   }
-  return <Modal open title={t(initial === undefined ? 'addMemory' : 'editMemory')} closeLabel={t('close')} onClose={close}>
+  return <Modal open title={title ?? t(initial === undefined ? 'addMemory' : 'editMemory')} closeLabel={t('close')} onClose={close}>
     <form onSubmit={(event) => { event.preventDefault(); submit() }}>
       <fieldset className={css.modelFields} disabled={pending}>
         <InlineEditor label={t('memoryContent')} value={draft.content} onChange={(content) => { setDraft(current => ({ ...current, content })) }}
           onSave={submit} onCancel={close} />
-        <div className={css.actions}>{(['declarative', 'non-declarative'] as const).map(kind =>
+        {preset === undefined ? <><div className={css.actions}>{(['declarative', 'non-declarative'] as const).map(kind =>
           <Button key={kind} type="button" variant="outline" aria-pressed={draft.kind === kind}
             onClick={() => { setDraft(current => ({ ...current, kind })) }}>{t(`kind.${kind}`)}</Button>)}</div>
         <div className={css.actions}>{(['episodic', 'semantic', 'self', 'procedural'] as const).map(category =>
@@ -57,6 +60,7 @@ export function MemoryEditor({ initial, save, saved, close, t }: PropsLocale<'ge
         <label htmlFor={`${field}-confidence`}>{t('memoryConfidence')}</label>
         <Input id={`${field}-confidence`} required type="number" min={0} max={1} step={0.01} value={draft.confidence}
           onChange={(event) => { setDraft(current => ({ ...current, confidence: Number(event.target.value) })) }} />
+        </> : null}
         <p className={css.secondary}>{t('operatorMemoryHint')}</p>
         <Button type="submit" disabled={!draft.content.trim()}>{t(pending ? 'working' : 'saveMemory')}</Button>
       </fieldset>

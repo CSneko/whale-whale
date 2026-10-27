@@ -11,6 +11,7 @@ import type { MemoryModelsSettings } from './status-types.ts'
 import type { LifeCore } from './core.ts'
 import { auxiliaryCall } from './auxiliary-call.ts'
 import { boundedJson } from './context.ts'
+import { behaviorMemories, behaviorReading, isNonDeclarative, PERSONALITY_GUIDANCE } from './personality.ts'
 import { interestReading } from './interest.ts'
 import { emotionAt } from './emotion-state.ts'
 import { deliberationPlanSchema, motivationStrength, type LifeDecision, type DecisionId } from './agency-state.ts'
@@ -173,29 +174,34 @@ export class LifeDeliberationEngine {
       if (previous !== undefined) return previous
       const now = new Date().toISOString()
       const query = messages.length ? JSON.stringify(messages).slice(0, this.calls.associationInputChars) : ''
-      const memories = await this.core.retrieve({ text: query.replace(/[\[\]{}":,]/gu, ' '),
-        limit: this.settings.memoryLimit, chars: this.settings.memoryChars })
+      const memories = (await this.core.retrieve({ text: query.replace(/[\[\]{}":,]/gu, ' '),
+        limit: this.settings.memoryLimit, chars: this.settings.memoryChars })).filter(memory => !isNonDeclarative(memory))
       const interests = (state.interests ?? []).filter(item => item.stage !== 'dormant')
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, this.config.queryLimit).map(interestReading)
       const recent = state.events.slice(-this.config.queryLimit)
-      const selfMemories = await this.core.retrieve({ text: '', category: 'self', limit: this.settings.memoryLimit, chars: this.settings.memoryChars })
-      const habits = await this.core.retrieve({ text: '', category: 'procedural', limit: this.settings.memoryLimit, chars: this.settings.memoryChars })
+      const personality = behaviorMemories(state, this.config, new Date(now))
+      // Historical motivation links may outlive the memories or interests they reference.
+      const currentMemoryIds = new Set(state.memories.map(memory => memory.id))
+      const currentInterestIds = new Set((state.interests ?? []).map(interest => interest.id))
       const input = { trigger, triggerEventId: event.id, sourceEventIds: [] as LifeEventId[],
         memoryIds: [] as MemoryId[], interestIds: [] as InterestId[], messages, now, participants: participants(state),
         triggerEvent: source === undefined ? event : state.events.find(item => item.id === source),
-        personalityEvidence: [...selfMemories, ...habits].map(({ embedding: _embedding, history: _history, ...item }) => item),
+        personalityEvidence: personality.map(memory => ({ ...behaviorReading(memory, state, new Date(now), this.config.timeZone),
+          id: memory.id, sourceEventIds: memory.sourceEventIds, habit: memory.habit })),
         needsAndEmotion: state.emotion === undefined ? null : emotionAt(state.emotion, now), interests,
         memories: memories.map(({ embedding: _embedding, history: _history, ...item }) => item),
         motivations: agency.motivations.filter(item => item.status !== 'ended')
           .map(item => ({ id: item.id, content: item.content, reason: item.reason,
             strength: motivationStrength(item, now, this.settings.motivationHalfLifeMs), status: item.status,
-            interestIds: item.interestIds, memoryIds: item.memoryIds, sourceEventIds: item.sourceEventIds }))
+            interestIds: item.interestIds.filter(id => currentInterestIds.has(id)),
+            memoryIds: item.memoryIds.filter(id => currentMemoryIds.has(id)), sourceEventIds: item.sourceEventIds }))
           .sort((a, b) => b.strength - a.strength).slice(0, this.config.queryLimit),
         goals: agency.goals.filter(item => item.status === 'active' || item.status === 'paused')
           .sort((a, b) => b.priority - a.priority).slice(0, this.config.queryLimit)
           .map(item => ({ id: item.id, content: item.content, reason: item.reason, origin: item.origin,
-            motivationIds: item.motivationIds, memoryIds: item.memoryIds, sourceEventIds: item.sourceEventIds,
-            priority: item.priority, status: item.status, nextAction: item.nextAction, failures: item.failures })),
+            motivationIds: item.motivationIds, memoryIds: item.memoryIds.filter(id => currentMemoryIds.has(id)),
+            sourceEventIds: item.sourceEventIds, priority: item.priority, status: item.status,
+            nextAction: item.nextAction, failures: item.failures })),
         recentDecisions: agency.decisions.slice(-this.config.queryLimit).map(item => ({ id: item.id,
           choice: item.candidates[item.selected], reason: item.reason, outcome: item.outcome, goalIds: item.goalIds })),
         recentEvents: recent.map(item => ({ id: item.id, type: item.type, timestamp: item.timestamp,
@@ -230,7 +236,7 @@ export class LifeDeliberationEngine {
         }
       }
       const plan = deliberationPlanSchema.parse(await auxiliaryCall(this.ctx, agent.session, 'deliberation-writer',
-        DELIBERATION_PROMPT + (purpose === 'interaction' ? '\nThis opportunity is ONLY whether to initiate a conversation with the operator. Choose accept if you have a grounded wish to share, ask, express a thought or chat; choose wait otherwise. Use existing emotion, needs, motivations, memories and relationships, without inventing a separate social drive or manufacturing urgency. Do not create a life goal merely to speak: interaction acceptance does not require a life goal and grants no task-tool access. The selected action describes what you want to say. Silence is fully valid. Never guilt the operator about absence, demand attention or imply you have suffered offline.' : ''), input, signal, this.readModels(), this.calls))
+        `${DELIBERATION_PROMPT}\n${PERSONALITY_GUIDANCE}` + (purpose === 'interaction' ? '\nThis opportunity is ONLY whether to initiate a conversation with the operator. Choose accept if you have a grounded wish to share, ask, express a thought or chat; choose wait otherwise. Use existing emotion, needs, motivations, memories and relationships, without inventing a separate social drive or manufacturing urgency. Do not create a life goal merely to speak: interaction acceptance does not require a life goal and grants no task-tool access. The selected action describes what you want to say. Silence is fully valid. Never guilt the operator about absence, demand attention or imply you have suffered offline.' : ''), input, signal, this.readModels(), this.calls))
       signal.throwIfAborted()
       return this.core.commitDeliberation({ key: fullKey, sessionId: agent.session.id, trigger, revision: agency.revision,
         ...(purpose === undefined ? {} : { purpose }),
@@ -313,21 +319,25 @@ export class LifeDeliberationEngine {
  * Build a bounded current agency projection for the logged life context.
  * @param core - Persistent life owner.
  * @param config - Deployment selection and character limits.
+ * @param includeEvidence - Defaults to an inspectable result with IDs; false emits only current prompt content.
  * @returns Complete JSON, or an explicit budget omission marker.
  */
-export async function agencyContext(core: LifeCore, config: Config): Promise<string> {
+export async function agencyContext(core: LifeCore, config: Config, includeEvidence = true): Promise<string> {
   const settings = config.deliberation
   if (settings === undefined) return ''
   const state = await core.snapshot()
   if (state.agency === undefined) throw new GenesisError('invalid-state', 'Agency context is absent. Inspect life storage.')
   const now = new Date().toISOString()
-  const view = { version: state.agency.version, revision: state.agency.revision,
+  const view = { ...(includeEvidence ? { version: state.agency.version, revision: state.agency.revision } : {}),
     motivations: state.agency.motivations.filter(item => item.status === 'active').slice(0, config.queryLimit)
-      .map(item => ({ id: item.id, content: item.content, strength: motivationStrength(item, now, settings.motivationHalfLifeMs),
-        sourceEventIds: item.sourceEventIds })),
+      .map(item => ({ content: item.content,
+        strength: includeEvidence ? motivationStrength(item, now, settings.motivationHalfLifeMs)
+          : `${Math.round(motivationStrength(item, now, settings.motivationHalfLifeMs) * 100)}%`,
+        ...(includeEvidence ? { id: item.id, sourceEventIds: item.sourceEventIds } : {}) })),
     goals: state.agency.goals.filter(item => item.status === 'active' || item.status === 'paused').slice(0, config.queryLimit)
-      .map(item => ({ id: item.id, content: item.content, status: item.status, priority: item.priority, nextAction: item.nextAction,
-        sourceEventIds: item.sourceEventIds })),
+      .map(item => ({ content: item.content, status: item.status,
+        priority: includeEvidence ? item.priority : `${Math.round(item.priority * 100)}%`, nextAction: item.nextAction,
+        ...(includeEvidence ? { id: item.id, sourceEventIds: item.sourceEventIds } : {}) })),
     omitted: { motivations: 0, goals: 0 },
   }
   while (JSON.stringify(view).length > settings.contextChars && (view.goals.length || view.motivations.length)) {

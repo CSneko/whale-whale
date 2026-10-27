@@ -8,6 +8,11 @@ A service can be a core spine service, a swappable capability seam, a bundle/com
 ```mermaid
 flowchart LR
   pkg_experimental_genesis["experimental-genesis"]
+  svc_genesisAgency["ctx.genesisAgency<br/>Genesis agency controls"]
+  svc_genesisDeliberation["ctx.genesisDeliberation<br/>Genesis deliberation"]
+  svc_genesisInitiative["ctx.genesisInitiative<br/>Genesis proactive interaction"]
+  svc_genesisMemory["ctx.genesisMemory<br/>Genesis memory controls"]
+  svc_genesisRecords["ctx.genesisRecords<br/>Genesis writing records"]
   svc_genesis["ctx.genesis<br/>Persistent Genesis life"]
   svc_genesisStatus["ctx.genesisStatus<br/>Genesis status projection"]
   pkg_experimental_client_ui_genesis["experimental-client-ui-genesis"]
@@ -350,6 +355,11 @@ flowchart LR
   pkg_experimental_computer_use_cua_driver_mcp --> svc_computerUse
   pkg_experimental_computer_use_cua_driver_native --> svc_computerUse
   pkg_experimental_genesis --> svc_genesis
+  pkg_experimental_genesis --> svc_genesisAgency
+  pkg_experimental_genesis --> svc_genesisDeliberation
+  pkg_experimental_genesis --> svc_genesisInitiative
+  pkg_experimental_genesis --> svc_genesisMemory
+  pkg_experimental_genesis --> svc_genesisRecords
   pkg_experimental_genesis --> svc_genesisStatus
   pkg_experimental_ptc_runtime_python --> svc_ptcRuntime
   pkg_experimental_speech_to_text --> svc_speechToText
@@ -497,6 +507,11 @@ flowchart LR
   svc_fileUploads --> pkg_api_session_controller
   svc_fs --> pkg_tool_fs
   svc_genesis --> pkg_experimental_genesis
+  svc_genesisAgency --> pkg_experimental_genesis
+  svc_genesisDeliberation --> pkg_experimental_genesis
+  svc_genesisInitiative --> pkg_experimental_genesis
+  svc_genesisMemory --> pkg_experimental_genesis
+  svc_genesisRecords --> pkg_experimental_genesis
   svc_genesisStatus --> pkg_experimental_client_ui_genesis
   svc_hmr --> pkg_app_boot
   svc_jobs --> pkg_api_job_controller
@@ -619,6 +634,11 @@ flowchart LR
 
 | ctx key | Role | Owner | Implementations | Direct consumers | Companion plugins | Note |
 | --- | --- | --- | --- | --- | --- | --- |
+| `ctx.genesisAgency` | `core` | [`experimental-genesis`](../packages/experimental/genesis) | - | [`experimental-genesis`](../packages/experimental/genesis) | - | Exposes bounded motivation and goal inspection plus explicit operator pause, resume and abandonment actions. |
+| `ctx.genesisDeliberation` | `core` | [`experimental-genesis`](../packages/experimental/genesis) | - | [`experimental-genesis`](../packages/experimental/genesis) | - | Records sourced life-wide choices and admits only verified accepted work through the existing Agent execution path. |
+| `ctx.genesisInitiative` | `core` | [`experimental-genesis`](../packages/experimental/genesis) | - | [`experimental-genesis`](../packages/experimental/genesis) | - | Schedules bounded speak-or-wait opportunities and reconciles delivery from persisted receipts. |
+| `ctx.genesisMemory` | `core` | [`experimental-genesis`](../packages/experimental/genesis) | - | [`experimental-genesis`](../packages/experimental/genesis) | - | Provides sourced memory search and explicit memory editing, personality inspection and lifecycle controls. |
+| `ctx.genesisRecords` | `core` | [`experimental-genesis`](../packages/experimental/genesis) | - | [`experimental-genesis`](../packages/experimental/genesis) | - | Owns bounded operator-authored writing records and their independent persistent storage. |
 | `ctx.genesis` | `core` | [`experimental-genesis`](../packages/experimental/genesis) | - | [`experimental-genesis`](../packages/experimental/genesis) | - | Owns one durable life, sourced memory, observed growth and local backups; the optional memory pipeline adds independent updates and semantic recall. |
 | `ctx.genesisStatus` | `core` | [`experimental-genesis`](../packages/experimental/genesis) | - | [`experimental-client-ui-genesis`](../packages/experimental/client-ui-genesis) | - | Samples bounded life and memory previews for the authenticated experimental Web settings contribution. |
 | `ctx.cotTranslation` | `service` | [`experimental-client-ui-cot-translation`](../packages/experimental/client-ui-cot-translation) | - | - | - | Serves reasoning translations, reuses saved results, and joins ordinary Session activation for uncached inactive Sessions. |

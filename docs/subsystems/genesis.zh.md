@@ -30,6 +30,33 @@ One life owner. Writes serialize components and replace one manifest, so facts a
 
 ```ts cordis-catalog
 /**
+ * Subscribe to newly committed life events; listeners must contain their own asynchronous failures.
+ * @param listener - Nonthrowing observer; callbacks must not mutate event values.
+ * @returns Disposer for the subscription.
+ */
+onCommitted(listener: (events: readonly LifeEvent[]) => void): () => void
+
+/** Initialize the optional outbox without replacing prior history.
+ * @returns After the state is durably initialized.
+ */
+initializeInitiative(): Promise<void>
+
+/**
+ * Record one replay-safe opportunity even when no conversation channel is available.
+ * @param key - Stable timer bucket or event identity.
+ * @param sourceEventId - Actual trigger or most recent recorded life event.
+ * @returns Existing or newly pending opportunity; capacity exhaustion remains visible.
+ */
+requestInteraction(key: string, sourceEventId: LifeEventId): Promise<InteractionRecord>
+
+/**
+ * Commit a delivery transition and its reason, content or receipt with the existing atomic life write.
+ * @param record - Engine-owned record derived from the latest life snapshot.
+ * @returns After the transition is durable; terminal receipts cannot be overwritten.
+ */
+saveInteraction(record: InteractionRecord): Promise<void>
+
+/**
  * Initialize once or restore the same life; birth and initial memory commit atomically.
  * @returns Resolution only after durable startup.
  */
@@ -74,6 +101,16 @@ permitsDecision(id: DecisionId): boolean
  * @returns After result publication; repeat settlements are no-ops.
  */
 settleDecision(id: DecisionId, outcome: LifeDecision['outcome']['status'], sources: LifeEventId[]): Promise<void>
+
+/**
+ * Record an explicit operator pause, resume or abandonment without changing goal origin or completion.
+ * @param id - Stable goal identifier.
+ * @param status - Active, paused or abandoned; completion requires verified execution.
+ * @param revision - Displayed agency revision for optimistic concurrency.
+ * @param reason - Human explanation, validated at this application input.
+ * @returns After the history and current state commit; stale edits leave both unchanged.
+ */
+setLifeGoalStatus(id: LifeGoalId, status: 'active' | 'paused' | 'abandoned', revision: number, reason: string): Promise<void>
 
 /**
  * Confirm goal completion after independent application verification of a successful linked execution.
@@ -342,6 +379,44 @@ Types: [ConsolidationCommit](../genesis/memory.zh.md) · [DecisionId](../genesis
 
 Source: [`packages/experimental/genesis/src/core.ts`](../../packages/experimental/genesis/src/core.ts)
 
+<a id="ctxgenesisagency--genesisagencygateway"></a>
+
+### `ctx.genesisAgency` — `GenesisAgencyGateway`
+
+Bounded agency inspection and explicit operator actions; no completion or permission mutation.
+
+```ts cordis-catalog
+/**
+ * Read current motivations, goals and recent decisions under complete response and item limits.
+ * @param signal - Caller cancellation; previous UI samples may be retained on failure.
+ * @returns Detached state with explicit omission counts and eligible live character Sessions.
+ */
+@Remote('inspect') async inspect(signal: AbortSignal): Promise<AgencyStatus>
+
+/**
+ * Pause, resume or abandon a life goal with a visible operator reason; terminal goals cannot reopen.
+ * @param id - Stable life goal identifier.
+ * @param status - Allowed operator transition; completion is deliberately excluded.
+ * @param revision - Displayed agency revision; concurrent changes are refused.
+ * @param reason - Human explanation retained in life history.
+ * @param signal - Caller cancellation; an admitted commit still drains.
+ * @returns After the sourced state transition commits.
+ */
+@Remote('setGoalStatus') async setGoalStatus(id: LifeGoalId, status: 'active' | 'paused' | 'abandoned', revision: number, reason: string, signal: AbortSignal): Promise<void>
+
+/**
+ * Request a new autonomous deliberation in an idle character conversation; the chosen action may execute.
+ * @param sessionId - Live idle Session selected explicitly by the operator.
+ * @param signal - Caller cancellation; committed choices remain auditable.
+ * @returns After the choice commits and any selected follow-up is enqueued.
+ */
+@Remote('deliberate') async deliberate(sessionId: SessionId, signal: AbortSignal): Promise<void>
+```
+
+Types: [AgencyStatus](../genesis/motivation.zh.md) · [LifeGoalId](../genesis/motivation.zh.md) · [SessionId](core.zh.md)
+
+Source: [`packages/experimental/genesis/src/agency-gateway.ts`](../../packages/experimental/genesis/src/agency-gateway.ts)
+
 <a id="ctxgenesisdeliberation--lifedeliberationengine"></a>
 
 ### `ctx.genesisDeliberation` — `LifeDeliberationEngine`
@@ -368,6 +443,16 @@ async admit(agent: Agent, messages: UserMessage[], signal: AbortSignal): Promise
 async deliberate(agent: Agent, request: { key: string; sourceEventId: LifeEventId }, signal: AbortSignal): Promise<LifeDecision>
 
 /**
+ * Offer one choice to speak or wait, reusing the existing bounded state and writer.
+ * @param agent - Idle character conversation used for the audited inference.
+ * @param key - Stable interaction opportunity key.
+ * @param source - Actual life trigger.
+ * @param signal - Owner cancellation.
+ * @returns A committed decision; this method never enqueues task execution.
+ */
+considerInteraction(agent: Agent, key: string, source: LifeEventId, signal: AbortSignal): Promise<LifeDecision>
+
+/**
  * Record only actual committed assistant/tool outcomes and clear live tool admission.
  * @param agent - Agent whose admitted execution is finishing.
  * @param interrupted - Whether failure, cancellation or disposal interrupted execution.
@@ -391,6 +476,60 @@ async close(): Promise<void>
 Types: [Agent](core.zh.md) · [LifeDecision](../genesis/motivation.zh.md) · [LifeEventId](../genesis/data-model.zh.md) · [SessionEvent](session.zh.md) · [SessionId](core.zh.md) · [UserMessage](session.zh.md)
 
 Source: [`packages/experimental/genesis/src/deliberation.ts`](../../packages/experimental/genesis/src/deliberation.ts)
+
+<a id="ctxgenesisinitiative--socialinitiative"></a>
+
+### `ctx.genesisInitiative` — `SocialInitiative`
+
+One serialized, cancelable owner; pending delivery never implies successful delivery.
+
+```ts cordis-catalog
+/** Subscribe to life events and arm the configured proactive checks.
+ * @returns After durable initialization and subscription; no immediate unsolicited message is forced.
+ */
+async start(): Promise<void>
+
+/**
+ * Give a timer or trusted life event exactly one speak-or-wait opportunity.
+ * @param request - Stable deduplication key and actual life evidence.
+ * @param signal - Optional caller cancellation; absent uses the plugin lifetime.
+ * @returns Durable outcome, including pending when there is no usable channel.
+ */
+considerInteraction(request: { key: string; sourceEventId: LifeEventId }, signal?: AbortSignal): Promise<InteractionRecord>
+
+/** One scheduled wake; the persisted bucket also deduplicates restarts within the interval.
+ * @returns After event catch-up and one scheduled opportunity. */
+async tick(): Promise<void>
+
+/**
+ * Admit only an outstanding attributed notice, rechecking limits and giving real user input priority.
+ * @param agent - Actual receiving conversation.
+ * @param messages - Proposed next-step inputs.
+ * @returns Inputs with any unsafe, canceled or already-settled initiative removed.
+ */
+async admit(agent: Agent, messages: UserMessage[]): Promise<UserMessage[]>
+
+/**
+ * Settle deliveries from the replayable receipt and retry only confirmed pending opportunities.
+ * @returns After currently available channels have been reconciled and pending work considered.
+ */
+resume(): Promise<void>
+
+/**
+ * Consume committed Session evidence; enqueueing or whole-Agent idle alone never marks success.
+ * @param session - Session whose projection has already folded the actual event.
+ */
+observe(session: Session): void
+
+/** Stop proactive checks and drain accepted work.
+ * @returns After timers stop and every accepted operation drains; queued notices require active plugin admission.
+ */
+async close(): Promise<void>
+```
+
+Types: [Agent](core.zh.md) · [LifeEventId](../genesis/data-model.zh.md) · [Session](session.zh.md) · [UserMessage](session.zh.md)
+
+Source: [`packages/experimental/genesis/src/social.ts`](../../packages/experimental/genesis/src/social.ts)
 
 <a id="ctxgenesismemory--genesismemorygateway"></a>
 
@@ -635,6 +774,13 @@ Sample shared life state and initialize its name without changing its identity o
 @Remote('testEmbedding') async testEmbedding(signal: AbortSignal): Promise<void>
 
 /**
+ * Read personality and expression memories independently of unrelated memory previews.
+ * @param signal - Caller cancellation before the bounded read.
+ * @returns Current behavioral records and an explicit count of omitted matches, without vector caches.
+ */
+@Remote('personality') personality(signal: AbortSignal): Promise<PersonalityStatus>
+
+/**
  * Browse or search stored memory text without requiring an embedding request.
  * @param query - Literal search text, bounded by the configured response budget.
  * @param signal - Caller cancellation.
@@ -652,7 +798,7 @@ Sample shared life state and initialize its name without changing its identity o
 @Remote('inspect') async inspect(signal: AbortSignal): Promise<LifeStatus>
 ```
 
-Types: [EmbeddingSettings](../genesis/memory.zh.md) · [LifeStatus](../genesis/data-model.zh.md) · [MemoryModelsSettings](../genesis/memory.zh.md) · [SessionId](core.zh.md)
+Types: [EmbeddingSettings](../genesis/memory.zh.md) · [LifeStatus](../genesis/data-model.zh.md) · [MemoryModelsSettings](../genesis/memory.zh.md) · [PersonalityStatus](../genesis/memory.zh.md) · [SessionId](core.zh.md)
 
 Source: [`packages/experimental/genesis/src/status.ts`](../../packages/experimental/genesis/src/status.ts)
 <!-- END GENERATED cordis-surface -->

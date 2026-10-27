@@ -52,7 +52,7 @@ pnpm dsh --profile headless --patch packages/experimental/genesis/cordis.patch.y
 
 ## 限制与扩展
 
-`maxMotivations`、`maxGoals`、`memoryLimit`、`memoryChars` 和 `contextChars` 限制清单、检索及当前上下文，其他集合由 `queryLimit` 限制。辅助输入在必要时移除可选条目，完整触发输入过大则拒绝。生命全局记录数与字符限制包含审议记录及历史；容量和校验失败不改变已提交状态，存储写入不确定时停止依赖操作直到验证后重新加载。输入获准前的辅助推理失败会停止该请求，不会默默接受。
+`maxMotivations`、`maxGoals`、`memoryLimit`、`memoryChars` 和 `contextChars` 限制清单、检索及当前上下文，其他集合由 `queryLimit` 限制。已从当前存储删除的记忆不会通过动机或目标关联进入审议上下文，其来源生命事件仍可作为证据。辅助输入在必要时移除可选条目，完整触发输入过大则拒绝。生命全局记录数与字符限制包含审议记录及历史；容量和校验失败不改变已提交状态，存储写入不确定时停止依赖操作直到验证后重新加载。输入获准前的辅助推理失败会停止该请求，不会默默接受。
 
 发生 `GENESIS_DELIBERATION_FAILED` 时，检查失败会话中的 `plugin:genesis/memory-call` 请求与响应；HTTP 写入模型则检查 `plugin:genesis/model-http` 记录。请求包含实际指令和选中的引用列表，响应在 JSON/schema 校验前保留。可见诊断报告允许显示的字段路径和未知字段数量，不复制不可信键名或值；Host 错误原因保留校验详情。重试前应纠正响应或证据选择。生成指令能减少 schema 漂移，但不能保证模型遵从；非法响应会停止准入，不改变已提交的审议状态。
 

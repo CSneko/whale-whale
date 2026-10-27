@@ -1211,6 +1211,30 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'One life owner. Writes serialize components and replace one manifest, so facts and state commit together. Storage failures poison this instance until reload; validation and capacity refusals leave it usable. Returned data is detached.',
     methods: [
       {
+        signature: 'onCommitted(listener: (events: readonly LifeEvent[]) => void): () => void',
+        description: 'Subscribe to newly committed life events; listeners must contain their own asynchronous failures.',
+        parameters: [{ name: 'listener', description: 'Nonthrowing observer; callbacks must not mutate event values.' }],
+        returns: 'Disposer for the subscription.',
+      },
+      {
+        signature: 'initializeInitiative(): Promise<void>',
+        description: 'Initialize the optional outbox without replacing prior history.',
+        parameters: [],
+        returns: 'After the state is durably initialized.',
+      },
+      {
+        signature: 'requestInteraction(key: string, sourceEventId: LifeEventId): Promise<InteractionRecord>',
+        description: 'Record one replay-safe opportunity even when no conversation channel is available.',
+        parameters: [{ name: 'key', description: 'Stable timer bucket or event identity.' }, { name: 'sourceEventId', description: 'Actual trigger or most recent recorded life event.' }],
+        returns: 'Existing or newly pending opportunity; capacity exhaustion remains visible.',
+      },
+      {
+        signature: 'saveInteraction(record: InteractionRecord): Promise<void>',
+        description: 'Commit a delivery transition and its reason, content or receipt with the existing atomic life write.',
+        parameters: [{ name: 'record', description: 'Engine-owned record derived from the latest life snapshot.' }],
+        returns: 'After the transition is durable; terminal receipts cannot be overwritten.',
+      },
+      {
         signature: 'start(): Promise<void>',
         description: 'Initialize once or restore the same life; birth and initial memory commit atomically.',
         parameters: [],
@@ -1245,6 +1269,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Attach observed Session result references and update failure history, without claiming goal completion.',
         parameters: [{ name: 'id', description: 'Committed decision whose execution has settled.' }, { name: 'outcome', description: 'Host-derived result, never model-authored text.' }, { name: 'sources', description: 'Actual observed life event IDs from this decision\'s Session.' }],
         returns: 'After result publication; repeat settlements are no-ops.',
+      },
+      {
+        signature: 'setLifeGoalStatus(id: LifeGoalId, status: \'active\' | \'paused\' | \'abandoned\', revision: number, reason: string): Promise<void>',
+        description: 'Record an explicit operator pause, resume or abandonment without changing goal origin or completion.',
+        parameters: [{ name: 'id', description: 'Stable goal identifier.' }, { name: 'status', description: 'Active, paused or abandoned; completion requires verified execution.' }, { name: 'revision', description: 'Displayed agency revision for optimistic concurrency.' }, { name: 'reason', description: 'Human explanation, validated at this application input.' }],
+        returns: 'After the history and current state commit; stale edits leave both unchanged.',
       },
       {
         signature: 'completeLifeGoal(id: LifeGoalId, decisionId: DecisionId, evidence: LifeEventId): Promise<void>',
@@ -1447,6 +1477,31 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'genesisAgency',
+    summary: 'Bounded agency inspection and explicit operator actions; no completion or permission mutation.',
+    description: 'Bounded agency inspection and explicit operator actions; no completion or permission mutation.',
+    methods: [
+      {
+        signature: '@Remote(\'inspect\') async inspect(signal: AbortSignal): Promise<AgencyStatus>',
+        description: 'Read current motivations, goals and recent decisions under complete response and item limits.',
+        parameters: [{ name: 'signal', description: 'Caller cancellation; previous UI samples may be retained on failure.' }],
+        returns: 'Detached state with explicit omission counts and eligible live character Sessions.',
+      },
+      {
+        signature: '@Remote(\'setGoalStatus\') async setGoalStatus(id: LifeGoalId, status: \'active\' | \'paused\' | \'abandoned\', revision: number, reason: string, signal: AbortSignal): Promise<void>',
+        description: 'Pause, resume or abandon a life goal with a visible operator reason; terminal goals cannot reopen.',
+        parameters: [{ name: 'id', description: 'Stable life goal identifier.' }, { name: 'status', description: 'Allowed operator transition; completion is deliberately excluded.' }, { name: 'revision', description: 'Displayed agency revision; concurrent changes are refused.' }, { name: 'reason', description: 'Human explanation retained in life history.' }, { name: 'signal', description: 'Caller cancellation; an admitted commit still drains.' }],
+        returns: 'After the sourced state transition commits.',
+      },
+      {
+        signature: '@Remote(\'deliberate\') async deliberate(sessionId: SessionId, signal: AbortSignal): Promise<void>',
+        description: 'Request a new autonomous deliberation in an idle character conversation; the chosen action may execute.',
+        parameters: [{ name: 'sessionId', description: 'Live idle Session selected explicitly by the operator.' }, { name: 'signal', description: 'Caller cancellation; committed choices remain auditable.' }],
+        returns: 'After the choice commits and any selected follow-up is enqueued.',
+      },
+    ],
+  },
+  {
     key: 'genesisDeliberation',
     summary: 'Life-wide FIFO for inference, with per-Agent admitted execution and cancellation ownership.',
     description: 'Life-wide FIFO for inference, with per-Agent admitted execution and cancellation ownership.',
@@ -1464,6 +1519,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'Committed choice. Waiting queues nothing; replay never dispatches the same decision again.',
       },
       {
+        signature: 'considerInteraction(agent: Agent, key: string, source: LifeEventId, signal: AbortSignal): Promise<LifeDecision>',
+        description: 'Offer one choice to speak or wait, reusing the existing bounded state and writer.',
+        parameters: [{ name: 'agent', description: 'Idle character conversation used for the audited inference.' }, { name: 'key', description: 'Stable interaction opportunity key.' }, { name: 'source', description: 'Actual life trigger.' }, { name: 'signal', description: 'Owner cancellation.' }],
+        returns: 'A committed decision; this method never enqueues task execution.',
+      },
+      {
         signature: 'settle(agent: Agent, interrupted: boolean): Promise<void>',
         description: 'Record only actual committed assistant/tool outcomes and clear live tool admission.',
         parameters: [{ name: 'agent', description: 'Agent whose admitted execution is finishing.' }, { name: 'interrupted', description: 'Whether failure, cancellation or disposal interrupted execution.' }],
@@ -1479,6 +1540,54 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Cancel auxiliary inference and drain accepted reviews; core storage remains owned by the plugin.',
         parameters: [],
         returns: 'After all pending inference operations settle.',
+      },
+    ],
+  },
+  {
+    key: 'genesisInitiative',
+    summary: 'One serialized, cancelable owner; pending delivery never implies successful delivery.',
+    description: 'One serialized, cancelable owner; pending delivery never implies successful delivery.',
+    methods: [
+      {
+        signature: 'async start(): Promise<void>',
+        description: 'Subscribe to life events and arm the configured proactive checks.',
+        parameters: [],
+        returns: 'After durable initialization and subscription; no immediate unsolicited message is forced.',
+      },
+      {
+        signature: 'considerInteraction(request: { key: string; sourceEventId: LifeEventId }, signal?: AbortSignal): Promise<InteractionRecord>',
+        description: 'Give a timer or trusted life event exactly one speak-or-wait opportunity.',
+        parameters: [{ name: 'request', description: 'Stable deduplication key and actual life evidence.' }, { name: 'signal', description: 'Optional caller cancellation; absent uses the plugin lifetime.' }],
+        returns: 'Durable outcome, including pending when there is no usable channel.',
+      },
+      {
+        signature: 'async tick(): Promise<void>',
+        description: 'One scheduled wake; the persisted bucket also deduplicates restarts within the interval.',
+        parameters: [],
+        returns: 'After event catch-up and one scheduled opportunity.',
+      },
+      {
+        signature: 'async admit(agent: Agent, messages: UserMessage[]): Promise<UserMessage[]>',
+        description: 'Admit only an outstanding attributed notice, rechecking limits and giving real user input priority.',
+        parameters: [{ name: 'agent', description: 'Actual receiving conversation.' }, { name: 'messages', description: 'Proposed next-step inputs.' }],
+        returns: 'Inputs with any unsafe, canceled or already-settled initiative removed.',
+      },
+      {
+        signature: 'resume(): Promise<void>',
+        description: 'Settle deliveries from the replayable receipt and retry only confirmed pending opportunities.',
+        parameters: [],
+        returns: 'After currently available channels have been reconciled and pending work considered.',
+      },
+      {
+        signature: 'observe(session: Session): void',
+        description: 'Consume committed Session evidence; enqueueing or whole-Agent idle alone never marks success.',
+        parameters: [{ name: 'session', description: 'Session whose projection has already folded the actual event.' }],
+      },
+      {
+        signature: 'async close(): Promise<void>',
+        description: 'Stop proactive checks and drain accepted work.',
+        parameters: [],
+        returns: 'After timers stop and every accepted operation drains; queued notices require active plugin admission.',
       },
     ],
   },
@@ -1644,6 +1753,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Probe the saved embedding configuration without changing identity or memories.',
         parameters: [{ name: 'signal', description: 'Caller cancellation; the configured memory deadline bounds the request.' }],
         returns: 'After one response with the expected vector dimensions has been verified.',
+      },
+      {
+        signature: '@Remote(\'personality\') personality(signal: AbortSignal): Promise<PersonalityStatus>',
+        description: 'Read personality and expression memories independently of unrelated memory previews.',
+        parameters: [{ name: 'signal', description: 'Caller cancellation before the bounded read.' }],
+        returns: 'Current behavioral records and an explicit count of omitted matches, without vector caches.',
       },
       {
         signature: '@Remote(\'memories\') async memories(query: string, signal: AbortSignal): Promise<LifeStatus[\'memories\']>',
@@ -5174,6 +5289,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type AgencyState = z.infer<typeof agencySchema>;',
   },
   {
+    name: 'AgencyStatus',
+    declaration: 'export interface AgencyStatus {\n    enabled: boolean;\n    revision: number;\n    sampledAt: string;\n    motivations: Array<LifeMotivation & {\n        currentStrength: number | null;\n    }>;\n    goals: Array<LifeGoal & {\n        historyOmitted: number;\n    }>;\n    decisions: LifeDecision[];\n    sessions: Array<{\n        id: SessionId;\n        idle: boolean;\n    }>;\n    omitted: {\n        motivations: number;\n        goals: number;\n        decisions: number;\n        sessions: number;\n    };\n}',
+  },
+  {
     name: 'Agent',
     declaration: 'export interface Agent {\n    readonly id: SessionId;\n}',
   },
@@ -5807,7 +5926,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'DeliberationCommit',
-    declaration: 'export interface DeliberationCommit {\n    key: string;\n    sessionId: SessionId;\n    trigger: \'request\' | \'event\';\n    revision: number;\n    sourceEventIds: LifeEventId[];\n    memoryIds: MemoryId[];\n    interestIds: InterestId[];\n    plan: DeliberationPlan;\n}',
+    declaration: 'export interface DeliberationCommit {\n    purpose?: \'interaction\';\n    key: string;\n    sessionId: SessionId;\n    trigger: \'request\' | \'event\';\n    revision: number;\n    sourceEventIds: LifeEventId[];\n    memoryIds: MemoryId[];\n    interestIds: InterestId[];\n    plan: DeliberationPlan;\n}',
   },
   {
     name: 'DeliberationPlan',
@@ -6250,6 +6369,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type InstallSpecKind = \'registry\' | \'path\' | \'git\' | \'tarball\';',
   },
   {
+    name: 'InteractionRecord',
+    declaration: 'export type InteractionRecord = z.infer<typeof interactionSchema>;',
+  },
+  {
     name: 'InterestDialogue',
     declaration: 'export type InterestDialogue = z.infer<typeof projectionSchema>;',
   },
@@ -6462,6 +6585,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type LifeEventId = Branded<\'GenesisLifeEventId\'>;',
   },
   {
+    name: 'LifeGoal',
+    declaration: 'export type LifeGoal = AgencyState[\'goals\'][number];',
+  },
+  {
     name: 'LifeGoalId',
     declaration: 'export type LifeGoalId = Branded<\'GenesisLifeGoalId\'>;',
   },
@@ -6476,6 +6603,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'LifeMemory',
     declaration: 'export type LifeMemory = z.infer<typeof memorySchema>;',
+  },
+  {
+    name: 'LifeMotivation',
+    declaration: 'export type LifeMotivation = AgencyState[\'motivations\'][number];',
   },
   {
     name: 'LifeState',
@@ -7040,6 +7171,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'PermissionCatalog',
     declaration: 'export interface PermissionCatalog {\n    options: PresetOption[];\n    defaultOptions: PresetOption[];\n    defaultPreset: string;\n}',
+  },
+  {
+    name: 'PersonalityStatus',
+    declaration: 'export interface PersonalityStatus {\n    entries: LifeMemory[];\n    omitted: number;\n}',
   },
   {
     name: 'PlatformSession',

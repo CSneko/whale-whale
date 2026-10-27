@@ -77,7 +77,8 @@ export class LifeInterestEngine {
         if (state.events.some(event => event.dedupKey === `interest-review:${agent.session.id}:${current.startSeq}`)) return
         stage = 'configuration'
         const models = this.readModels()
-        const input = { autonomousDecision: autonomous ?? null, interests: state.interests.map(item => ({ id: item.id, topic: item.topic, stage: item.stage,
+        const input = { autonomousDecision: autonomous ?? null, interests: state.interests.map(item => ({
+          id: item.id, topic: item.topic, stage: item.stage,
           exchanges: item.evidence.length, reason: item.reason })), conversation, newStartSeq: current.startSeq,
         limits: { minEnduringTurns: this.config.minEnduringTurns, maxInterests: this.config.maxInterests } }
         while (input.conversation.length > 1 && JSON.stringify(input).length > this.calls.inputChars) input.conversation.shift()
@@ -111,7 +112,7 @@ export class LifeInterestEngine {
  * @param interest - Existing sourced interest interpretation.
  * @returns Formation time, strength, stability and distinct evidence count.
  */
-export function interestReading(interest: LifeInterest) {
+export function interestReading(interest: LifeInterest): LifeInterest & { formedAt: string; strength: number; stability: number } {
   const positive = interest.evidence.filter(item => item.signal !== 'contact' && item.signal !== 'disinterest').length
   const returns = interest.evidence.filter(item => item.signal === 'return' && item.selfInitiated).length
   return { ...interest, formedAt: interest.createdAt, strength: interest.stage === 'dormant' ? 0 : positive / interest.evidence.length,

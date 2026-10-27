@@ -43,6 +43,8 @@ interface Config {
    * load: it would expose the port on every interface at once.
    */
   host: string
+  /** Explicitly permit wildcard binding for deployments with configured authentication. Default: false. */
+  allowWildcardHost?: boolean
   /** Listen port; zero requests an OS-assigned port. */
   port: number
   /**

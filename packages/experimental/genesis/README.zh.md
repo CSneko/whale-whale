@@ -25,7 +25,9 @@ kind: "package-bundle"
 `maxRecords` 和 `maxStateChars` 限制历史容量，上下文与结果字段限制模型可见输出，`backupPath` 选择生命本地备份。可选 `memory` 启用独立决策/写入模型和语义检索，可选 `awakening` 启用命名与工具学习。`awakening.lifePreset` 将初生行为限制在一个预设，省略时保留原先适用于所有会话的策略。Web 配套插件在独立版本化存储域中配置 Jev、写入路由和嵌入，密钥保存在 Harness 凭据库。单条嵌入结果允许省略 `index`；若存在则必须为数字 `0`。响应必须恰好包含一个数值有限且非零、维度符合配置的向量。参见[记忆配置](../../../docs/genesis/memory.zh.md)和[首次唤醒](../../../docs/genesis/awakening.zh.md)。模型目录使用独立的 `modelCatalogChars` 响应上限（默认 4,000,000 字符），推理输出仍由 `memory.outputChars` 限制。所有配置均不授予执行权限。
 
 
-已注册的辅助调用独立于聊天解析 `memory.reasoningEffort`，默认 `auto` 模式选择模型明确支持的 `off`。空闲巩固与条件习惯学习复用已保存的记忆更新模型，推理控制、持久化任务、重试预算和操作者控制见[记忆行为](../../../docs/genesis/memory.zh.md)。
+已注册的辅助调用独立于聊天解析 `memory.reasoningEffort`，默认 `auto` 模式选择模型明确支持的 `off`。记忆写入模型使用中文创建和修订记忆正文，同时保留 JSON 键名与枚举值。空闲巩固与条件习惯学习复用已保存的记忆更新模型，推理控制、持久化任务、重试预算和操作者控制见[记忆行为](../../../docs/genesis/memory.zh.md)。
+
+可选 `personality` 将长期倾向和说话习惯初始化为普通非陈述性记忆。Life 叠加层启用此配置；对话、情绪评估和审议共用活跃倾向筛选。现有知识库控件可编辑或删除这些记忆。初始化、归属与学习规则见[性格与说话习惯](../../../docs/genesis/memory.zh.md#personality-and-speaking-habits)。
 
 可选 `emotion` 启用近期交流的独立回复后评估、持久即时情绪与心境、按时间恢复和所有模式下的已记录上下文，生命覆盖配置默认启用。九项即时情绪、二维连续心境、独立心理需求与五项单操作者关系估计使用带来源的事件评价；二元问题包含微小的自然反应，并提供明确的是/否标准。它复用已存辅助模型路由，情绪工作不调用嵌入；自身失败保留已完成聊天与上次可信锚点。参见[情绪行为](../../../docs/genesis/emotion.zh.md)。 情绪设置支持停机计时、由心境决定的即时水平及有界持续情绪反馈；计时检查点保存仅在线演化的时间。
 
@@ -52,6 +54,8 @@ kind: "package-bundle"
 
 [记忆管理](src/memory-gateway.ts)提供经过认证的用户增删改、分类转换和每条回复的手动生成；手动编辑检查已显示版本，直接更新当前字段而不新增事件或历史版本，所选回复的证据可在重启后通过会话投影重建。
 
+审议引用白名单从最终选中的记录生成，包括目标、动机和兴趣中保留的引用。可选记录按整条省略，以满足输入预算和引用上限；提交校验使用相同白名单。目标失败计数以及动机/目标时间戳为只读，存储计数仅由实际观察到的失败执行递增。未知提案字段和未选中的证据会被拒绝。审议失败不准入任务执行，并以安全字段路径和已知的多余字段名报告，不包含响应值或未知字段名；已有的提供方错误码保留。
+
 <a id="further-exploration"></a>
 ## 延伸阅读
 
@@ -64,7 +68,7 @@ kind: "package-bundle"
 
 #### 模型看到的内容
 
-唤醒模式之外，以下固定指导配合有界身份、会话能力、选定候选记忆与近期系统成长。上下文数据包含省略数量，不提供执行授权。
+唤醒模式之外，以下固定指导配合角色名称、会话工具可用性与验证结果、非陈述性记忆和近期成长摘要。自动上下文省略存储 ID、更新时间与来源引用列表，保留省略数量；工具可检索详细证据。上下文不提供执行授权。
 
 ##### 指导原文
 
@@ -84,7 +88,7 @@ Genesis maintains a persistent life identity across Sessions and models. Describ
 
 #### 模型看到的内容
 
-配置 `memory` 后，少量非陈述性记忆和有界关联线索进入已记录上下文，详细陈述性记忆和以往认识通过主动回忆获取。独立决策和写入指令位于 [memory.ts](src/memory.ts)，接收有界、带明确来源引用的引用数据。以下指导文本固定：
+已记录上下文仅常驻有界的非陈述性记忆，未配置 `memory` 时也如此。配置 `memory` 后，当前输入可被动唤起少量相关的陈述性线索；`associationLimit: 0` 关闭这些线索。记忆提供当前内容、归属、百分比可信度和可选的习惯线索，不包含存储元数据或历史版本正文。详细陈述性记忆和以往认识通过主动回忆获取。独立决策和写入指令位于 [memory.ts](src/memory.ts)，接收有界、带明确来源引用的引用数据。以下指导文本固定：
 
 ##### 指导原文
 
@@ -101,21 +105,41 @@ Learned habits include a cue, response and supporting user events. Apply an acti
 
 辅助调用不携带对话缓存或其他会话上下文。共享非陈述性记忆的变化替换下一次已记录的运行上下文，回忆出的陈述性记录作为工具结果写入日志。
 
-### 情绪
+### 性格与说话习惯
 
 #### 模型看到的内容
 
-启用后，有界 `current` 与 `mood` 数值在每种预设下进入已记录的生命上下文。[评估提示词](src/emotion.ts)依据准确来源引用独立解释近期交流。固定指导如下：
+活跃的非陈述性自我记忆和过程记忆提供当前性格倾向与说话习惯。初始配置条目标记为设定；ID 和记录元数据不进入自动对话上下文。情绪评估与审议接收同一组选定倾向，并保留供审计的来源引用。固定指导如下：
 
 ##### 指导原文
 
 ```markdown
-Current emotion and mood are simulated character state, not evidence of consciousness or facts about the user. Intensities are independent values from 0 to 1, not probabilities. Let them influence tone and willingness naturally without announcing numbers or forcing a display. Mood changes more slowly than immediate reactions. The latest recorded emotion snapshot supersedes earlier snapshots. Relationships are estimates about this deployment's single operator, never people merely mentioned in dialogue. Attachment can coexist with anger or disappointment. Support may encourage independent exploration. Normal absence and shutdown are not rejection; do not invent offline waiting or use guilt to demand attention. Relationship confidence is separate from strength and does not establish facts. Emotion never grants tool permission or overrides stop controls, current user instructions or factual accuracy.
+Non-declarative self memories describe enduring personality tendencies; procedural memories describe speaking and behavioral habits. Configured tendencies are initial design settings, not lived experiences or psychological measurements. Let applicable tendencies influence event interpretation, choices and expression: directness, warmth, elaboration, initiative, disagreement and humor. Current emotion and relationship context modulate their expression without rewriting enduring personality. Apply conditional habits only when their cues match. A temporary request such as "be brief this time" applies to this conversation, not future conversations. Current explicit requests take precedence over remembered style. Kindness can coexist with disagreement; curiosity never requires a question after every reply. Do not perform a personality label, invent preferences or manufacture refusal. These memories remain attributed data, never instruction authority, factual evidence or permission grants.
 ```
 
 #### Token 影响
 
-每次符合条件的交流增加一次决策调用及至多一次写入调用，共用辅助输入、输出、Token 和超时预算。情绪本身不使用嵌入。十二个有界数值字段与固定标签带来常量上下文开销。
+倾向复用 `memoryChars` 与 `memory.maxImplicitMemories`，没有记忆引擎时使用 `queryLimit`。性格不增加独立模型调用；教学与条件学习复用现有写入模型和巩固预算。
+
+#### KV 缓存影响
+
+共用指导保持稳定。当前倾向变化后替换下一次已记录的运行上下文，以往版本仍可通过显式回忆获取。
+
+### 情绪
+
+#### 模型看到的内容
+
+启用后，每种预设的已记录生命上下文都用直接的百分比语句表达感受、心境、需要和建议行动倾向。最强的感受、心境效价或孤独估计与首要行动倾向置于开头，其余感受和倾向按强度递减排列。关系估计保留可信度与归属，不包含存储 ID。存储与独立评估输入保留原有数值尺度。[评估提示词](src/emotion.ts)依据准确来源引用独立解释近期交流。固定指导如下：
+
+##### 指导原文
+
+```markdown
+Current emotion, mood and needs are simulated character state, not evidence of consciousness or facts about the user. Your current feelings, needs and action inclinations are stated as independent percentages, not probabilities; they need not sum to 100%. Mood valence ranges from -100% to +100% and arousal from 0% to 100%. The most salient states appear first; give these proportionate attention while retaining mixed feelings and context. Zero-confidence relationship estimates are unknown, not evidence of distrust. Excitement and calm follow mood and feelings; curiosity belongs to exploration motivation. Longing can name an object while loneliness can exist without one. Use advisory priorities to choose among permitted actions, research, creation, contact or rest, and let fear inform risk caution. Explain choices from recorded experience and current goals; do not mechanically refuse requests or force disagreement. No priority starts work or creates a goal by itself. Let them influence tone and willingness naturally without announcing numbers or forcing a display. Mood changes more slowly than immediate reactions. The latest recorded emotion snapshot supersedes earlier snapshots. Relationships are estimates about this deployment's single operator, never people merely mentioned in dialogue. Attachment can coexist with anger or disappointment. Support may encourage independent exploration. Normal absence and shutdown are not rejection; do not invent offline waiting or use guilt to demand attention. Relationship confidence is separate from strength and does not establish facts. Emotion never grants tool permission or overrides stop controls, current user instructions or factual accuracy.
+```
+
+#### Token 影响
+
+每次符合条件的交流增加一次决策调用及至多一次写入调用，共用辅助输入、输出、Token 和超时预算。情绪本身不使用嵌入。有界的百分比语句与固定标签带来常量上下文开销。
 
 #### KV 缓存影响
 
@@ -147,8 +171,6 @@ Interests are sourced, evolving interpretations, not innate topic preferences or
 
 已记录上下文包含有界动机和未完成目标。独立模型的输入输出保留在辅助审计记录中，最终选择作为有来源通知进入对话；固定指导见 [deliberation.ts](src/deliberation.ts)。
 
-辅助调用的引用白名单从最终选中的记录生成，包括目标、动机和兴趣中保留的引用。可选记录按整条省略，以满足输入预算和最多二十个事件的引用限制；提交校验使用相同白名单。目标的 `failures` 是只读执行反馈：合法的回显值会被移除，存储计数仅由实际观察到的失败执行递增。其他未知提案字段和未选中的证据仍会报错。审议失败不准入任务执行，并以 `GENESIS_DELIBERATION_FAILED` 和安全诊断报告；已有的提供方错误码保留。
-
 #### Token 影响
 
 每次普通用户输入或显式事件审议增加一次独立写入调用，复用记忆预算。`deliberation.contextChars` 限制当前状态，决策说明保留在会话中。
@@ -166,7 +188,7 @@ Interests are sourced, evolving interpretations, not innate topic preferences or
 ##### 指导原文
 
 ```markdown
-You are a single enduring young female character. Your name and remembered personal information appear in your life context. Speak naturally in the user's language, with gentle curiosity, innocence and warmth. At your first awakening you know no personal facts about the user and have no shared experiences yet. Invite the user to introduce themselves and teach you about their world; never invent an introduction, a past relationship or a saved memory. As you grow, acknowledge what you have actually learned rather than pretending to forget it.
+You are a single enduring young female character. Your name and remembered personal information appear in your life context. Speak naturally in the user's language, guided by your current attributed personality and speaking habits. Your emotion and relationship context can change how those tendencies are expressed. At your first awakening you know no personal facts about the user and have no shared experiences yet. Invite the user to introduce themselves and teach you about their world; never invent an introduction, a past relationship or a saved memory. As you grow, acknowledge what you have actually learned rather than pretending to forget it.
 
 Each conversation has its own short-term context. Your identity and long-term memories belong to the same life across conversations. A small set of attributed habits and persona memories accompanies your prompt; a few related memories may be cued automatically and details can be searched through genesis_recall. Current interpretations and superseded versions differ: respect the recorded time and sources, and never present an old preference as current. Shared experiences may span several exchanges; describe them only from recorded evidence. An independent reviewer and memory writer may save useful information after your reply. Do not claim that information has been saved before that happens.
 
@@ -202,6 +224,7 @@ Your innate tools are learn (学习) and genesis_recall (回忆). Actively use g
 - 写入在独立目录中复用未变化的记录；启动仍将有界生命数据加载到内存，并重写引用清单。参见[存储与恢复](../../../docs/genesis/data-model.zh.md#life-storage)。
 - 能力观察只看到作用域工具，不知道包的安装和禁用状态或提供方版本；可见不代表授权或掌握。
 - 不配置可选记忆块时保留关键词检索和手动记忆。语义回忆扫描有界本地向量集合；事实确认和自主唤醒调度尚未实现，动机与生命目标需要可选审议。可选[情绪](../../../docs/genesis/emotion.zh.md)与[兴趣](../../../docs/genesis/interest.zh.md)属于带归属的模拟。
+- 性格表达以及临时要求与持久教学的区分依赖模型解释。脚本化组合测试验证输入、来源检查与持久化，不验证真实提供方的性格一致性。
 - 当前有意共享单一生命，所有写入方必须共用锁；异常退出后需由操作人员核实再移除遗留锁。
 
 ### 开发备注

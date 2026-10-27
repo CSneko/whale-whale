@@ -227,7 +227,8 @@ export class SocialInitiative {
 
   /**
    * Admit only an outstanding attributed notice, rechecking limits and giving real user input priority.
-   * @param agent - Actual receiving conversation. @param messages - Proposed next-step inputs.
+   * @param agent - Actual receiving conversation.
+   * @param messages - Proposed next-step inputs.
    * @returns Inputs with any unsafe, canceled or already-settled initiative removed.
    */
   async admit(agent: Agent, messages: UserMessage[]): Promise<UserMessage[]> {
@@ -297,7 +298,9 @@ export class SocialInitiative {
     }
   }
 
-  /** @returns After timers stop and every accepted operation drains; queued notices require active plugin admission. */
+  /** Stop proactive checks and drain accepted work.
+   * @returns After timers stop and every accepted operation drains; queued notices require active plugin admission.
+   */
   async close(): Promise<void> {
     this.lifetime.abort()
     if (this.timer !== undefined) clearTimeout(this.timer)

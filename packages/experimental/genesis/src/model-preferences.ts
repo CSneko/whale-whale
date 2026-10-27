@@ -41,7 +41,9 @@ export class ModelPreferences {
   private closing: Promise<void> | undefined
   /** @param domain - Exclusive preferences domain. @param config - Deployment fallback. */
   constructor(private readonly domain: Domain<typeof modelPreferencesDomain>, private readonly config: Config) {}
-  /** @returns Detached effective routes and revision; zero means deployment values. */
+  /** Read saved routes or deployment defaults.
+   * @returns Detached effective routes and revision; zero means deployment values.
+   */
   read(): { revision: number; models: MemoryModelsSettings } {
     if (this.failure !== undefined) throw this.failure
     if (this.closing !== undefined) throw new GenesisError('closed', 'Memory model settings are closing.')
@@ -72,6 +74,6 @@ export class ModelPreferences {
     this.tail = operation.then(() => {}, (_error: unknown) => { /* The caller reports failures; disposal drains the settled queue. */ })
     return operation
   }
-  /** @returns After accepted writes drain and the preferences domain closes. */
+  /** Drain accepted writes and close the preferences domain. @returns After all accepted writes settle and the domain closes. */
   close(): Promise<void> { this.closing ??= this.tail.then(() => this.domain.close()); return this.closing }
 }
