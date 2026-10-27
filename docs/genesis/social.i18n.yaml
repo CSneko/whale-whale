@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for social.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/genesis/social.md
+/genesis-proactive-messages:
+  en: c5b98dd5251117ce
+  zh: c03157a27b325927
+/genesis-proactive-messages/configuration-and-status:
+  en: 83dd220918cc5d83
+  zh: dd6f59a833e73b02
+/genesis-proactive-messages/decision-and-delivery:
+  en: de81d18463006f27
+  zh: 0dbfa65dcbbdca7f
+/genesis-proactive-messages/recovery-and-limits:
+  en: a5ef72ba12aa3528
+  zh: a2654ba3727b9c79

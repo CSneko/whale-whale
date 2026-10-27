@@ -3,6 +3,8 @@ import z from '@deepseek-ai/schemastery'
 import type { Mood, EmotionHalfLives, MoodHalfLives, Needs } from './emotion-state.ts'
 /** Optional proactive conversation policy; durations are milliseconds. */
 export interface SocialInitiativeConfig {
+  /** Permit new opportunities and pending delivery admission; saved operator settings override this default. */
+  enabled: boolean
   /** Explicit conversation; absent selects the latest live character conversation with real user activity. */
   sessionId?: string
   /** Period between decision opportunities while the process runs. */
@@ -93,6 +95,14 @@ export interface RecordsConfig {
 }
 /** Bounded post-reply emotion appraisal and deterministic recovery. */
 export interface EmotionConfig {
+  /** Include stopped-process time in affect evolution; defaults to the existing wall-clock behavior. */
+  offlineChanges: boolean
+  /** Maximum mood-dependent immediate equilibrium intensity, from zero to one. */
+  moodEmotionScale: number
+  /** Fraction of slow mood's destination contributed by sustained immediate affect, at most one half. */
+  emotionMoodInfluence: number
+  /** Milliseconds between durable online-only clock checkpoints; crash recovery resumes at the last successful checkpoint. */
+  clockCheckpointMs: number
   /** Shared emotion recovery and appraisal multiplier, including relationship learning; zero freezes automatic changes. */
   sensitivity: number
   /** Maximum related and self memories supplied to each appraisal. */
@@ -119,7 +129,7 @@ export interface EmotionConfig {
   repetitionDiscount: number
   /** Completed exchanges considered per review, including the current exchange. */
   windowTurns: number
-  /** Initial mood and long-term recovery destination for each dimension. */
+  /** Initial mood and trait contribution to the long-term destination for each dimension. */
   baseline: Mood
   /** Per-field short reaction half-lives in milliseconds. */
   shortHalfLifeMs: EmotionHalfLives
@@ -246,6 +256,7 @@ const initialNeeds = z.object({ socialDesire: z.number().min(0).max(1).default(0
 /** Loader schema resolves every deployment-varying bound before plugin activation. */
 export const Config: z<Partial<Omit<Config, 'emotion' | 'interest' | 'records' | 'deliberation' | 'socialInitiative'>> & Pick<Config, 'leasePath'> & { emotion?: Partial<EmotionConfig> | undefined; interest?: Partial<InterestConfig> | undefined; records?: Partial<RecordsConfig> | undefined; deliberation?: Partial<DeliberationConfig> | undefined; socialInitiative?: Partial<SocialInitiativeConfig> | undefined }, Config> = z.object({
   socialInitiative: z.union([z.const(undefined), z.object({
+    enabled: z.boolean().default(true),
     sessionId: z.string(), intervalMs: z.number().step(1).min(1000).max(86400000).default(1800000),
     minSendIntervalMs: z.number().step(1).min(0).max(86400000).default(1800000),
     maxPer24Hours: z.number().step(1).min(1).max(100).default(6),
@@ -257,6 +268,9 @@ export const Config: z<Partial<Omit<Config, 'emotion' | 'interest' | 'records' |
   awakening: z.union([z.const(undefined), z.object({
     provider: z.string().required(), model: z.string().required(), lifePreset: z.string() })]),
   emotion: z.union([z.const(undefined), z.object({
+    offlineChanges: z.boolean().default(true), moodEmotionScale: z.number().min(0).max(1).default(0.2),
+    emotionMoodInfluence: z.number().min(0).max(0.5).default(0.25),
+    clockCheckpointMs: z.number().step(1).min(1000).max(3600000).default(60000),
     sensitivity: z.number().min(0).max(2).default(1),
     windowTurns: z.number().step(1).min(1).max(12).default(4),
     relationshipEnabled: z.boolean().default(true), maxRelationshipDelta: z.number().min(0).max(1).default(0.01),

@@ -441,7 +441,7 @@ export type Config = LocalConfig
 /** Browser authentication, request limits, and connection recovery configuration. */
 export interface ConnectionConfig {
   /** Optional private key-file login bound to client IP and this process; absence retains the launch-token carrier. */
-  keyLogin?: KeyLoginConfig
+  keyLogin?: KeyLoginConfig | undefined
   /** Browser recovery timing, injected into each served page. */
   recovery?: ConnectionRecoveryConfig
   /**
@@ -1066,11 +1066,13 @@ export type Config = CuaConfig
 
 - `inject`: `storageDomain` · `tools` · `systemPrompt` · `agents` · `llm` · `sessionProjections` · `sandboxPolicy`
 - `refs`: `z` (`zod`)
-- `source`: [`packages/experimental/genesis/src/config.ts:5`](../packages/experimental/genesis/src/config.ts)
+- `source`: [`packages/experimental/genesis/src/config.ts:26`](../packages/experimental/genesis/src/config.ts)
 
 ```ts config-catalog
 /** Validated, resolved Genesis plugin configuration. */
 export interface Config {
+  /** Lightweight proactive conversation; requires deliberation and memory. */
+  socialInitiative?: SocialInitiativeConfig | undefined
   /** Calendar zone for memory anchors and relative recall; defaults to the host's IANA zone. */
   timeZone: string
   /** Enables naming, newborn conversations and persistent tool learning on the configured chat route. */
@@ -1116,6 +1118,28 @@ export interface Config {
   modelCatalogChars: number
   /** Maximum records in a query response. */
   queryLimit: number
+}
+
+/** Optional proactive conversation policy; durations are milliseconds. */
+export interface SocialInitiativeConfig {
+  /** Permit new opportunities and pending delivery admission; saved operator settings override this default. */
+  enabled: boolean
+  /** Explicit conversation; absent selects the latest live character conversation with real user activity. */
+  sessionId?: string
+  /** Period between decision opportunities while the process runs. */
+  intervalMs: number
+  /** Minimum time between proactive messages. */
+  minSendIntervalMs: number
+  /** Maximum proactive messages in a rolling twenty-four hours. */
+  maxPer24Hours: number
+  /** Required quiet time after the latest real user message. */
+  userIdleMs: number
+  /** Memory importance required for discovery or thought triggers. */
+  eventImportance: number
+  /** Maximum unresolved opportunities. */
+  maxPending: number
+  /** Pending opportunities expire rather than sending stale messages. */
+  maxPendingAgeMs: number
 }
 
 /** Storage and complete-response limits for independently authored writing records. */
@@ -1213,6 +1237,14 @@ export interface MemoryConfig {
 
 /** Bounded post-reply emotion appraisal and deterministic recovery. */
 export interface EmotionConfig {
+  /** Include stopped-process time in affect evolution; defaults to the existing wall-clock behavior. */
+  offlineChanges: boolean
+  /** Maximum mood-dependent immediate equilibrium intensity, from zero to one. */
+  moodEmotionScale: number
+  /** Fraction of slow mood's destination contributed by sustained immediate affect, at most one half. */
+  emotionMoodInfluence: number
+  /** Milliseconds between durable online-only clock checkpoints; crash recovery resumes at the last successful checkpoint. */
+  clockCheckpointMs: number
   /** Shared emotion recovery and appraisal multiplier, including relationship learning; zero freezes automatic changes. */
   sensitivity: number
   /** Maximum related and self memories supplied to each appraisal. */
@@ -1239,7 +1271,7 @@ export interface EmotionConfig {
   repetitionDiscount: number
   /** Completed exchanges considered per review, including the current exchange. */
   windowTurns: number
-  /** Initial mood and long-term recovery destination for each dimension. */
+  /** Initial mood and trait contribution to the long-term destination for each dimension. */
   baseline: Mood
   /** Per-field short reaction half-lives in milliseconds. */
   shortHalfLifeMs: EmotionHalfLives

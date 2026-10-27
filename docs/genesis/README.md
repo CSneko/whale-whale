@@ -8,7 +8,7 @@ Keep one life identity across Sessions and models, retain sourced candidate memo
 
 ## Contents
 
-[First awakening](awakening.md) · [Memory](memory.md) · [Emotion](emotion.md) · [Interests](interest.md) · [Motivation and decisions](motivation.md) · [Architecture](architecture.md) · [Data model](data-model.md) · [Development](development.md) · [Roadmap](roadmap.md) · [Writings](records.md) · [Remote access](remote-access.md)
+[First awakening](awakening.md) · [Memory](memory.md) · [Emotion](emotion.md) · [Interests](interest.md) · [Motivation and decisions](motivation.md) · [Proactive messages](social.md) · [Architecture](architecture.md) · [Data model](data-model.md) · [Development](development.md) · [Roadmap](roadmap.md) · [Writings](records.md) · [Remote access](remote-access.md)
 
 ## Run from this workspace
 
@@ -60,7 +60,7 @@ Disable default Genesis in workspace Web launches with the leading `--no-genesis
 
 ## Limits
 
-Optional [emotion](emotion.md) maintains immediate state and slower mood; the workspace life overlay enables it. Optional [interests](interest.md) form from cited exchanges without predefined favorite topics. Optional [deliberation](motivation.md) provides persistent motivations, cross-Session goals and enforced willingness; autonomous wake scheduling, reflection and self-improvement remain unavailable. Tool discovery records availability, not mastery or permission. The optional [memory pipeline](memory.md) adds embedding search and independent updates. Automatic plugin installation and autonomous source modification remain unavailable.
+Optional [emotion](emotion.md) maintains immediate state and slower mood; the workspace life overlay enables it. Optional [interests](interest.md) form from cited exchanges without predefined favorite topics. Optional [deliberation](motivation.md) provides persistent motivations, cross-Session goals and enforced willingness; autonomous task scheduling, reflection and self-improvement remain unavailable. Tool discovery records availability, not mastery or permission. The optional [memory pipeline](memory.md) adds embedding search and independent updates. Automatic plugin installation and autonomous source modification remain unavailable.
 
 ## Dev Note
 

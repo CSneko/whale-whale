@@ -10,7 +10,9 @@ import css from './StatusPanel.module.css'
 import emotionCss from './EmotionPanel.module.css'
 
 function settingsDraft(settings: EmotionSettings) {
-  return { enabled: settings.enabled, sensitivity: String(settings.sensitivity), windowTurns: String(settings.windowTurns), maxDelta: String(settings.maxDelta),
+  return { enabled: settings.enabled, offlineChanges: settings.offlineChanges,
+    moodEmotionScale: String(settings.moodEmotionScale), emotionMoodInfluence: String(settings.emotionMoodInfluence),
+    sensitivity: String(settings.sensitivity), windowTurns: String(settings.windowTurns), maxDelta: String(settings.maxDelta),
     maxMoodDelta: String(settings.maxMoodDelta),
     relationshipEnabled: settings.relationshipEnabled, maxRelationshipDelta: String(settings.maxRelationshipDelta),
     moodSupportTurns: String(settings.moodSupportTurns), importantEventThreshold: String(settings.importantEventThreshold), repetitionDiscount: String(settings.repetitionDiscount),
@@ -39,7 +41,9 @@ export function EmotionSettingsEditor({ initial, latest, saveSettings, close, sa
     <form className={emotionCss.form} onSubmit={(event) => {
       event.preventDefault()
       if (operation.current !== undefined || !event.currentTarget.reportValidity()) return
-      const settings = { enabled: draft.enabled, sensitivity: Number(draft.sensitivity), windowTurns: Number(draft.windowTurns), maxDelta: Number(draft.maxDelta),
+      const settings = { enabled: draft.enabled, offlineChanges: draft.offlineChanges,
+        moodEmotionScale: Number(draft.moodEmotionScale), emotionMoodInfluence: Number(draft.emotionMoodInfluence),
+        sensitivity: Number(draft.sensitivity), windowTurns: Number(draft.windowTurns), maxDelta: Number(draft.maxDelta),
         maxMoodDelta: Number(draft.maxMoodDelta), relationshipEnabled: draft.relationshipEnabled,
         maxRelationshipDelta: Number(draft.maxRelationshipDelta), moodSupportTurns: Number(draft.moodSupportTurns),
         importantEventThreshold: Number(draft.importantEventThreshold), repetitionDiscount: Number(draft.repetitionDiscount),
@@ -61,6 +65,15 @@ export function EmotionSettingsEditor({ initial, latest, saveSettings, close, sa
       <fieldset className={css.modelFields} disabled={pending}>
         <div className={css.header}><span>{t('emotionAutomatic')}</span><Switch label={t('emotionAutomatic')} checked={draft.enabled} onChange={(enabled) => { setDraft(current => ({ ...current, enabled })) }} /></div>
         <p className={css.secondary}>{t('emotionPauseHint')}</p>
+        <div className={css.header}><span>{t('emotionOfflineChanges')}</span><Switch label={t('emotionOfflineChanges')} checked={draft.offlineChanges}
+          onChange={(offlineChanges) => { setDraft(current => ({ ...current, offlineChanges })) }} /></div>
+        <p className={css.secondary}>{t('emotionOfflineHint')}</p>
+        <p className={css.secondary}>{t('emotionCouplingHint')}</p>
+        <div className={emotionCss.fields}>{(['moodEmotionScale', 'emotionMoodInfluence'] as const).map(field => <label className={emotionCss.field} key={field}>
+          {t(`emotionSetting.${field}`)}
+          <Input type="number" required min={0} max={field === 'emotionMoodInfluence' ? 0.5 : 1} step="any" value={draft[field]}
+            onChange={(event) => { setDraft(current => ({ ...current, [field]: event.target.value })) }} />
+        </label>)}</div>
         <div className={css.header}><span>{t('relationshipAutomatic')}</span><Switch label={t('relationshipAutomatic')} checked={draft.relationshipEnabled}
           onChange={(relationshipEnabled) => { setDraft(current => ({ ...current, relationshipEnabled })) }} /></div>
         <div className={emotionCss.field}>

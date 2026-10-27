@@ -1,7 +1,7 @@
 /** Atomic life state, sourced memory retrieval and observed system growth. @module */
 import { applyDeliberation, type DeliberationCommit } from './agency.ts'
 import type { DecisionId, LifeDecision, LifeGoalId } from './agency-state.ts'
-import type { InteractionRecord, InteractionId } from './social-state.ts'
+import { resolveInitiative, type InitiativeSettings, type InteractionRecord, type InteractionId } from './social-state.ts'
 import { randomUUID, createHash } from 'node:crypto'
 import { z } from 'zod'
 import { brandString } from '@deepseek-ai/dsh-brand'
@@ -82,8 +82,11 @@ function fact(state: LifeState, type: string, dedupKey: string, payload: LifeEve
   return event
 }
 function emotionRecord(state: StoredEmotionState) {
-  const { controls, ...anchor } = state
-  const record = { ...anchor, ...(controls === undefined ? {} : { controls }) }
+  const { controls, offlineChanges, moodEmotionScale, emotionMoodInfluence, ...anchor } = state
+  const record = { ...anchor, ...(controls === undefined ? {} : { controls }),
+    ...(offlineChanges === undefined ? {} : { offlineChanges }),
+    ...(moodEmotionScale === undefined ? {} : { moodEmotionScale }),
+    ...(emotionMoodInfluence === undefined ? {} : { emotionMoodInfluence }) }
   return record
 }
 function grow(state: LifeState, event: LifeEvent, title: string, description: string): void {
@@ -114,8 +117,45 @@ export class LifeCore {
   initializeInitiative(): Promise<void> {
     return this.change(state => {
       if (state.initiative !== undefined) return
-      state.initiative = { version: 1, records: [] }
-      fact(state, 'initiative.initialized', 'initiative:initialized', {})
+      state.initiative = { version: 1, revision: 0, records: [] }
+      state.initiative.eventCursor = fact(state, 'initiative.initialized', 'initiative:initialized', {}).id
+    })
+  }
+
+  /**
+   * Save complete proactive policy atomically; enabling starts with current events, preserving existing pending records.
+   * @param settings - Validated operator policy.
+   * @param revision - Last displayed settings revision; receipt changes do not invalidate a draft.
+   * @returns New revision, only after durable commit.
+   */
+  configureInitiative(settings: InitiativeSettings, revision: number): Promise<number> {
+    return this.change((state) => {
+      if (this.config.socialInitiative === undefined || state.initiative === undefined) throw new GenesisError('invalid-state', 'Social initiative is unavailable in this profile.')
+      const initiative = state.initiative
+      if ((initiative.revision ?? 0) !== revision) throw new GenesisError('configuration-conflict', 'Proactive settings changed. Reload before saving your draft.')
+      const wasEnabled = resolveInitiative(this.config.socialInitiative, initiative).enabled
+      const { sessionId, ...policy } = settings
+      initiative.settings = { ...policy, ...(sessionId === undefined ? {} : { sessionId }) }
+      initiative.revision = revision + 1
+      const event = fact(state, 'initiative.configured', `initiative:settings:${initiative.revision}`, {
+        revision: initiative.revision, settings: { ...policy, ...(sessionId === undefined ? {} : { sessionId }) },
+      }, 'user')
+      if (!wasEnabled || !settings.enabled) initiative.eventCursor = event.id
+      return initiative.revision
+    })
+  }
+
+  /**
+   * Advance the event catch-up cursor monotonically without manufacturing an experience.
+   * @param eventId - Last examined committed event.
+   * @returns After the cursor is durable; old cursors cannot move it backwards.
+   */
+  advanceInitiativeCursor(eventId: LifeEventId): Promise<void> {
+    return this.change((state) => {
+      if (state.initiative === undefined) return
+      this.checkSources(state, [eventId])
+      const old = state.events.findIndex(event => event.id === state.initiative?.eventCursor)
+      if (state.events.findIndex(event => event.id === eventId) > old) state.initiative.eventCursor = eventId
     })
   }
 
@@ -131,13 +171,16 @@ export class LifeCore {
       if (initiative === undefined || this.config.socialInitiative === undefined) throw new GenesisError('invalid-state', 'Social initiative is disabled.')
       const previous = initiative.records.find(item => item.key === key)
       if (previous !== undefined) return previous
+      const policy = resolveInitiative(this.config.socialInitiative, initiative)
+      if (!policy.enabled) throw new GenesisError('configuration-conflict', 'Proactive conversation is paused.')
       this.checkSources(state, [sourceEventId])
-      if (initiative.records.filter(item => item.status === 'pending' || item.status === 'dispatching').length >= this.config.socialInitiative.maxPending) {
+      if (initiative.records.filter(item => item.status === 'pending' || item.status === 'dispatching').length >= policy.maxPending) {
         throw new GenesisError('capacity', 'Genesis pending interaction queue is full. Inspect pending deliveries before retrying.')
       }
       const item: InteractionRecord = { id: brandString<InteractionId>(randomUUID()), key, sourceEventId,
         status: 'pending', createdAt: new Date().toISOString() }
       initiative.records.push(item)
+      initiative.lastCheckAt = item.createdAt
       fact(state, 'initiative.requested', `initiative:${key}`, { interactionId: item.id, sourceEventId })
       return item
     })
@@ -152,7 +195,11 @@ export class LifeCore {
     return this.change(state => {
       const current = state.initiative?.records.find(item => item.id === record.id)
       if (current === undefined || current.key !== record.key || current.sourceEventId !== record.sourceEventId) throw new GenesisError('invalid-source', 'Interaction opportunity is absent or changed.')
-      if (['sent', 'skipped', 'uncertain'].includes(current.status)) return
+      if (['sent', 'skipped'].includes(current.status) || current.status === 'uncertain' && record.status !== 'sent') return
+      if (record.status === 'dispatching' && current.status === 'pending'
+        && (this.config.socialInitiative === undefined || !resolveInitiative(this.config.socialInitiative, state.initiative).enabled)) {
+        throw new GenesisError('configuration-conflict', 'Proactive conversation was paused before dispatch.')
+      }
       if (JSON.stringify(current) === JSON.stringify(record)) return
       Object.assign(current, record)
       fact(state, 'initiative.changed', `initiative-transition:${randomUUID()}`, { interactionId: record.id, status: record.status })
@@ -239,12 +286,24 @@ export class LifeCore {
               content: 'Persistent identity and sourced long-term memory are enabled. Emotion is simulated; motivation and autonomous awakening are not implemented.' })
             fact(state, 'memory.updated', `emotion:self-description:${legacy.id}`, { memoryId: legacy.id })
           }
-        } else if (state.emotion.controls === undefined && JSON.stringify([state.emotion.baseline, state.emotion.shortHalfLifeMs, state.emotion.moodHalfLifeMs, state.emotion.needsHalfLifeMs, state.emotion.interactionHalfLifeMs, state.emotion.sensitivity])
-          !== JSON.stringify([config.baseline, config.shortHalfLifeMs, config.moodHalfLifeMs, config.needsHalfLifeMs, config.interactionHalfLifeMs, config.sensitivity])) {
+        } else {
           const previous = state.emotion
-          state.emotion = { ...emotionAt(previous, now), revision: previous.revision + 1,
-            sensitivity: config.sensitivity, baseline: { ...config.baseline }, shortHalfLifeMs: { ...config.shortHalfLifeMs }, moodHalfLifeMs: { ...config.moodHalfLifeMs }, needsHalfLifeMs: config.needsHalfLifeMs, interactionHalfLifeMs: config.interactionHalfLifeMs }
-          fact(state, 'emotion.configured', `emotion:configuration:${state.emotion.revision}`, { before: emotionRecord(previous), after: emotionRecord(state.emotion) })
+          const resumed = (previous.offlineChanges ?? true) ? emotionAt(previous, now)
+            : { ...previous, updatedAt: Date.parse(now) > Date.parse(previous.updatedAt) ? now : previous.updatedAt }
+          const desired = previous.controls === undefined
+            ? resolveEmotion(config, initialEmotion(config, now)) : resolveEmotion(config, previous)
+          const changed = JSON.stringify([previous.sensitivity, previous.baseline, previous.shortHalfLifeMs, previous.moodHalfLifeMs,
+            previous.needsHalfLifeMs, previous.interactionHalfLifeMs,
+            previous.offlineChanges, previous.moodEmotionScale, previous.emotionMoodInfluence])
+            !== JSON.stringify([desired.sensitivity, desired.baseline, desired.shortHalfLifeMs, desired.moodHalfLifeMs,
+              desired.needsHalfLifeMs, desired.interactionHalfLifeMs,
+              desired.offlineChanges, desired.moodEmotionScale, desired.emotionMoodInfluence])
+          const { enabled: _enabled, windowTurns: _window, maxDelta: _delta, maxMoodDelta: _mood, maxNeedsDelta: _needs,
+            contextStep: _step, relationshipEnabled: _relationship, maxRelationshipDelta: _relationshipDelta,
+            moodSupportTurns: _support, importantEventThreshold: _important, repetitionDiscount: _discount, ...recovery } = desired
+          state.emotion = { ...resumed, ...recovery, revision: previous.revision + (changed ? 1 : 0) }
+          if (changed) fact(state, 'emotion.configured', `emotion:configuration:${state.emotion.revision}`, {
+            before: emotionRecord(previous), after: emotionRecord(state.emotion), reason: 'startup-recovery-settings' })
         }
       }
       if (this.config.deliberation !== undefined && state.agency === undefined) {
@@ -563,6 +622,17 @@ export class LifeCore {
   }
 
   /**
+   * Save elapsed online affect time without changing operator revisions or creating an experience.
+   * @returns After the online-only anchor is durable; storage uncertainty stops dependent operations.
+   */
+  checkpointEmotion(): Promise<void> {
+    if (this.config.emotion === undefined || this.state().emotion?.offlineChanges !== false) return Promise.resolve()
+    return this.change((state) => {
+      if (state.emotion?.offlineChanges === false) state.emotion = emotionAt(state.emotion, new Date().toISOString())
+    })
+  }
+
+  /**
    * Save operator emotion rules with revision fencing; recovery under the old rules precedes the change.
    * @param settings - Validated complete operator choices; they take precedence over deployment defaults.
    * @param revision - Last displayed emotion revision; concurrent appraisals or edits reject this write.
@@ -573,9 +643,11 @@ export class LifeCore {
       if (this.config.emotion === undefined || state.emotion === undefined) throw new GenesisError('invalid-state', 'Enable emotion in the active profile before changing its settings.')
       if (state.emotion.revision !== revision) throw new GenesisError('configuration-conflict', 'Emotion changed. Reload the current values before saving your draft again.')
       const before = emotionAt(state.emotion, new Date().toISOString())
-      const { sensitivity, baseline, shortHalfLifeMs, moodHalfLifeMs, needsHalfLifeMs, interactionHalfLifeMs, ...controls } = settings
+      const { sensitivity, baseline, shortHalfLifeMs, moodHalfLifeMs, needsHalfLifeMs, interactionHalfLifeMs,
+        offlineChanges, moodEmotionScale, emotionMoodInfluence, ...controls } = settings
       const after = { ...before, sensitivity, baseline: { ...baseline }, shortHalfLifeMs: { ...shortHalfLifeMs },
-        moodHalfLifeMs: { ...moodHalfLifeMs }, needsHalfLifeMs, interactionHalfLifeMs, controls: { ...controls }, revision: revision + 1 }
+        moodHalfLifeMs: { ...moodHalfLifeMs }, needsHalfLifeMs, interactionHalfLifeMs,
+        offlineChanges, moodEmotionScale, emotionMoodInfluence, controls: { ...controls }, revision: revision + 1 }
       state.emotion = after
       fact(state, 'emotion.configured', `emotion:settings:${after.revision}`, { before: emotionRecord(before), after: emotionRecord(after),
         reason: 'operator-settings', attribution: 'user-stated' }, 'user')
@@ -1236,6 +1308,9 @@ export class LifeCore {
       try {
         if (this.failure !== undefined) throw this.failure
         const state = structuredClone(this.state())
+        if (this.config.emotion !== undefined && state.emotion !== undefined) {
+          state.emotion = emotionAt(state.emotion, new Date().toISOString())
+        }
         fact(state, 'life.stopped', `stop:${randomUUID()}`, {})
         await this.persist(state)
       } finally {

@@ -16,6 +16,8 @@
     emotion: {}
     interest: {}
     deliberation: {}
+    socialInitiative:
+      enabled: false
     awakening:
       lifePreset: life
       provider: !!js process.env.GENESIS_CHAT_PROVIDER ?? 'deepseek-official'

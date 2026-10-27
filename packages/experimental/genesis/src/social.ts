@@ -6,8 +6,8 @@ import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 import type { LifeCore } from './core.ts'
 import type { LifeDeliberationEngine } from './deliberation.ts'
 import type { SocialInitiativeConfig } from './config.ts'
-import type { LifeEvent, LifeEventId, LifeState } from './model.ts'
-import type { InteractionRecord } from './social-state.ts'
+import type { LifeEventId, LifeState } from './model.ts'
+import { resolveInitiative, type InteractionRecord } from './social-state.ts'
 import { statusFailure } from './status-error.ts'
 
 /** One serialized, cancelable owner; pending delivery never implies successful delivery. */
@@ -16,6 +16,9 @@ export class SocialInitiative {
   private readonly lifetime = new AbortController()
   private timer: ReturnType<typeof setTimeout> | undefined
   private unsubscribe: (() => void) | undefined
+  private working = false
+  private nextCheckAt: string | null = null
+  private failure: { code: string; message: string } | null = null
 
   /** @param ctx - Actual channel and Session projections. @param core - Durable life owner.
    * @param decisions - Existing bounded emotion/motivation/memory deliberation.
@@ -23,33 +26,56 @@ export class SocialInitiative {
   constructor(private readonly ctx: Context, private readonly core: LifeCore, private readonly decisions: LifeDeliberationEngine,
     private readonly policy: SocialInitiativeConfig, private readonly applies: (agent: Agent) => boolean) {}
 
-  /** @returns After durable initialization and subscription; no immediate unsolicited message is forced. */
+  /** @returns After initialization, pending-receipt recovery and timer setup; startup creates no new opportunity. */
   async start(): Promise<void> {
     await this.core.initializeInitiative()
-    this.unsubscribe = this.core.onCommitted(events => {
-      const relevant = events.filter(event => ['goal.completed', 'goal.changed', 'memory.created', 'memory.updated'].includes(event.type))
-      if (relevant.length) this.background(this.checkEvents(relevant))
+    this.unsubscribe = this.core.onCommitted((events) => {
+      if (events.some(event => event.type === 'initiative.configured')) this.background(this.refreshTimer())
+      if (events.some(event => ['goal.completed', 'goal.changed', 'memory.created', 'memory.updated'].includes(event.type))) {
+        this.background(this.serial(() => this.checkEvents()))
+      }
     })
-    this.arm()
+    await this.resume()
+    await this.refreshTimer()
   }
 
-  private arm(): void {
+  /** @returns Current runtime evidence; configuration and receipts remain core-owned. */
+  status(): { working: boolean; nextCheckAt: string | null; failure: { code: string; message: string } | null } {
+    return { working: this.working, nextCheckAt: this.nextCheckAt, failure: this.failure === null ? null : { ...this.failure } }
+  }
+
+  private async refreshTimer(): Promise<void> {
+    const settings = resolveInitiative(this.policy, (await this.core.snapshot()).initiative)
+    if (this.timer !== undefined) clearTimeout(this.timer)
+    this.timer = undefined
+    this.nextCheckAt = null
     if (this.lifetime.signal.aborted) return
+    if (!settings.enabled) return
+    this.nextCheckAt = new Date(Date.now() + settings.intervalMs).toISOString()
     this.timer = setTimeout(() => {
       this.timer = undefined
-      this.background(this.tick().finally(() => this.arm()))
-    }, this.policy.intervalMs)
+      this.nextCheckAt = null
+      this.background((async () => { try { await this.tick() } finally { await this.refreshTimer() } })())
+    }, settings.intervalMs)
     this.timer.unref()
   }
 
   private background(operation: Promise<unknown>): void {
     void operation.catch((error: unknown) => {
-      if (!this.lifetime.signal.aborted) this.ctx.logger.warn(`Genesis social initiative paused or pending: ${statusFailure(error).message}`)
+      if (!this.lifetime.signal.aborted) {
+        const failure = statusFailure(error)
+        this.failure = { code: failure.code, message: failure.message }
+        this.ctx.logger.warn(`Genesis social initiative paused or pending: ${failure.message}`)
+      }
     })
   }
 
   private serial<T>(run: () => Promise<T>): Promise<T> {
-    const operation = this.tail.then(() => { this.lifetime.signal.throwIfAborted(); return run() })
+    const operation = this.tail.then(async () => {
+      this.lifetime.signal.throwIfAborted()
+      this.working = true
+      try { return await run() } finally { this.working = false }
+    })
     this.tail = operation.then(() => {}, (_error: unknown) => { /* Caller or background reporter owns the failure. */ })
     return operation
   }
@@ -64,69 +90,102 @@ export class SocialInitiative {
     return this.serial(async () => {
       const owned = AbortSignal.any([this.lifetime.signal, ...(signal === undefined ? [] : [signal])])
       owned.throwIfAborted()
-      const record = await this.core.requestInteraction(request.key, request.sourceEventId)
-      return this.process(record, owned)
+      return this.consider(request, owned)
     })
+  }
+
+  private async consider(request: { key: string; sourceEventId: LifeEventId }, signal: AbortSignal): Promise<InteractionRecord> {
+    const record = await this.core.requestInteraction(request.key, request.sourceEventId)
+    try {
+      const result = await this.process(record, signal)
+      this.failure = null
+      return result
+    } catch (error) {
+      const diagnostic = statusFailure(error)
+      this.failure = { code: diagnostic.code, message: diagnostic.message }
+      const current = (await this.core.snapshot()).initiative?.records.find(item => item.id === record.id)
+      if (current !== undefined) await this.core.saveInteraction({ ...current, note: diagnostic.message })
+      throw error
+    }
   }
 
   /** One scheduled wake; the persisted bucket also deduplicates restarts within the interval.
    * @returns After event catch-up and one scheduled opportunity. */
-  async tick(): Promise<void> {
-    const state = await this.core.snapshot()
-    const start = state.events.findIndex(event => event.type === 'initiative.initialized')
-    await this.checkEvents(state.events.slice(start + 1))
-    await this.resume()
-    // A timer may reconsider grounded life evidence, but never its own request,
-    // decision or delivery records; those would turn silence into a feedback loop.
-    const source = [...state.events].reverse().find(event => event.type === 'goal.completed'
+  tick(): Promise<void> {
+    return this.serial(async () => {
+      await this.checkEvents()
+      await this.resumePending()
+      const state = await this.core.snapshot()
+      const policy = resolveInitiative(this.policy, state.initiative)
+      if (!policy.enabled) return
+      // A timer may reconsider grounded life evidence, but never its own request,
+      // decision or delivery records; those would turn silence into a feedback loop.
+      const source = [...state.events].reverse().find(event => event.type === 'goal.completed'
       || event.type === 'memory.created' || event.type === 'memory.updated'
       || event.source === 'user' && event.payload['kind'] === 'user-message')
-    if (source !== undefined) await this.considerInteraction({ key: `timer:${Math.floor(Date.now() / this.policy.intervalMs)}`, sourceEventId: source.id })
+      if (source !== undefined) await this.consider({ key: `timer:${state.initiative?.revision ?? 0}:${Math.floor(Date.now() / policy.intervalMs)}`, sourceEventId: source.id }, this.lifetime.signal)
+    })
   }
 
-  private async checkEvents(events: readonly LifeEvent[]): Promise<void> {
+  private async checkEvents(): Promise<void> {
     const state = await this.core.snapshot()
+    const settings = resolveInitiative(this.policy, state.initiative)
+    const cursor = state.initiative?.eventCursor
+    const start = state.events.findIndex(event => cursor === undefined ? event.type === 'initiative.initialized' : event.id === cursor)
+    const events = state.events.slice(start + 1)
     for (const event of events) {
+      if (!settings.enabled) break
       const memory = state.memories.find(item => item.id === event.payload['memoryId'])
       const important = ['memory.created', 'memory.updated'].includes(event.type) && memory !== undefined
-        && memory.importance >= this.policy.eventImportance
+        && memory.importance >= settings.eventImportance
       const decision = state.agency?.decisions.find(item => item.id === event.payload['decisionId'])
       const proposal = event.payload['after']
       const significantThought = event.type === 'goal.changed' && event.payload['previousStatus'] === null
         && decision?.purpose !== 'interaction' && typeof proposal === 'object' && proposal !== null
         && 'origin' in proposal && proposal.origin === 'autonomous'
       if (event.type === 'goal.completed' || important || significantThought) {
-        await this.considerInteraction({ key: `event:${event.id}`, sourceEventId: event.id })
+        await this.consider({ key: `event:${event.id}`, sourceEventId: event.id }, this.lifetime.signal)
       }
     }
+    const last = events.at(-1)
+    if (last !== undefined) await this.core.advanceInitiativeCursor(last.id)
   }
 
   private channel(record: InteractionRecord, state: LifeState): Agent | undefined {
     const agents = this.ctx.agents.list().filter(agent => this.applies(agent) && agent.status === 'idle'
       && agent.inbox.nextTurn.length === 0 && agent.inbox.nextStep.length === 0)
-    const target = record.sessionId ?? (this.policy.sessionId === undefined ? undefined : SessionId(this.policy.sessionId))
+    const policy = resolveInitiative(this.policy, state.initiative)
+    const target = record.sessionId ?? (policy.sessionId === undefined ? undefined : SessionId(policy.sessionId))
     if (target !== undefined) return agents.find(agent => agent.session.id === target)
     const latest = [...state.events].reverse().find(event => event.source === 'user' && event.payload['kind'] === 'user-message'
       && agents.some(agent => agent.session.id === event.relatedSessionId))
     return agents.find(agent => agent.session.id === latest?.relatedSessionId)
   }
 
-  private limited(state: LifeState, record: InteractionRecord): string | undefined {
+  private limited(state: LifeState, record: InteractionRecord): { note: string; expired: boolean } | undefined {
+    const policy = resolveInitiative(this.policy, state.initiative)
+    const hold = (note: string) => ({ note, expired: false })
+    if (!policy.enabled) return hold('Proactive conversation is paused.')
     const now = Date.now()
+    if (now - Date.parse(record.createdAt) >= policy.maxPendingAgeMs) {
+      return { note: 'The opportunity expired without a confirmed delivery.', expired: true }
+    }
     const records = state.initiative?.records ?? []
-    if (records.some(item => item.id !== record.id && item.status === 'dispatching')) return 'Another proactive delivery is awaiting confirmation.'
+    if (records.some(item => item.id !== record.id && item.status === 'dispatching')) return hold('Another proactive delivery is awaiting confirmation.')
     const deliveries = records.filter(item => item.id !== record.id && (item.status === 'sent' || item.status === 'uncertain'))
     const times = deliveries.map(item => Date.parse(item.sentAt ?? item.dispatchedAt ?? item.createdAt))
-    if (times.some(time => now - time < this.policy.minSendIntervalMs)) return 'Proactive message cooldown is active.'
-    if (times.filter(time => now - time < 86400000).length >= this.policy.maxPer24Hours) return 'Rolling proactive message limit reached.'
+    if (times.some(time => now - time < policy.minSendIntervalMs)) return hold('Proactive message cooldown is active.')
+    if (times.filter(time => now - time < 86400000).length >= policy.maxPer24Hours) return hold('Rolling proactive message limit reached.')
     const user = [...state.events].reverse().find(event => event.source === 'user' && event.payload['kind'] === 'user-message')
-    if (user !== undefined && now - Date.parse(user.timestamp) < this.policy.userIdleMs) return 'Wait for a quiet interval after user activity.'
+    if (user !== undefined && now - Date.parse(user.timestamp) < policy.userIdleMs) return hold('Wait for a quiet interval after user activity.')
     return undefined
   }
 
   private async process(record: InteractionRecord, signal: AbortSignal): Promise<InteractionRecord> {
     if (record.status !== 'pending') return record
-    if (Date.now() - Date.parse(record.createdAt) >= this.policy.maxPendingAgeMs) {
+    const policy = resolveInitiative(this.policy, (await this.core.snapshot()).initiative)
+    if (!policy.enabled) return record
+    if (Date.now() - Date.parse(record.createdAt) >= policy.maxPendingAgeMs) {
       record = { ...record, status: 'skipped', note: 'The opportunity expired without a confirmed delivery.' }
     } else {
       const state = await this.core.snapshot()
@@ -134,15 +193,20 @@ export class SocialInitiative {
       if (agent === undefined) record = { ...record, note: 'No idle character conversation channel is available; not sent.' }
       else {
         if (record.decisionId === undefined) {
+          if (record.sessionId === undefined) {
+            record = { ...record, sessionId: agent.session.id }
+            await this.core.saveInteraction(record)
+          }
           const decision = await this.decisions.considerInteraction(agent, record.key, record.sourceEventId, signal)
           const wants = decision.candidates[decision.selected]?.disposition === 'accept'
           record = { ...record, decisionId: decision.id, sessionId: agent.session.id, reason: decision.reason,
             status: wants ? 'pending' : 'skipped', note: wants ? 'Genesis chose to communicate; delivery is pending.' : 'Genesis chose not to initiate a conversation.' }
           await this.core.saveInteraction(record)
+          this.failure = null
         }
         if (record.status === 'pending') {
           const limit = this.limited(await this.core.snapshot(), record)
-          if (limit !== undefined) record = { ...record, note: limit }
+          if (limit !== undefined) record = { ...record, status: limit.expired ? 'skipped' : 'pending', note: limit.note }
           else if (agent.status === 'idle' && agent.inbox.nextTurn.length === 0 && agent.inbox.nextStep.length === 0) {
             signal.throwIfAborted()
             record = { ...record, status: 'dispatching', dispatchedAt: new Date().toISOString(), note: 'Awaiting an actual assistant message in the conversation.' }
@@ -174,8 +238,9 @@ export class SocialInitiative {
       const state = await this.core.snapshot()
       const record = state.initiative?.records.find(item => item.id === interactionId)
       if (record?.status !== 'dispatching' || record.sessionId !== agent.session.id || !this.applies(agent)) continue
-      const limit = messages.some(item => item.source.kind === 'user') ? 'Real user input takes priority.' : this.limited(state, record)
-      if (limit !== undefined) await this.core.saveInteraction({ ...record, status: 'pending', note: limit })
+      const limit = messages.some(item => item.source.kind === 'user')
+        ? { note: 'Real user input takes priority.', expired: false } : this.limited(state, record)
+      if (limit !== undefined) await this.core.saveInteraction({ ...record, status: limit.expired ? 'skipped' : 'pending', note: limit.note })
       else result.push(message)
     }
     return result
@@ -186,11 +251,18 @@ export class SocialInitiative {
    * @returns After currently available channels have been reconciled and pending work considered.
    */
   resume(): Promise<void> {
-    return this.serial(async () => {
-      for (const agent of this.ctx.agents.list().filter(this.applies)) await this.reconcile(agent.session, agent)
-      const records = (await this.core.snapshot()).initiative?.records ?? []
-      for (const record of records) if (record.status === 'pending') await this.process(record, this.lifetime.signal)
-    })
+    return this.serial(() => this.resumePending())
+  }
+
+  private async resumePending(): Promise<void> {
+    const agents = this.ctx.agents.list().filter(this.applies)
+    for (const agent of agents) await this.reconcile(agent.session, agent)
+    const records = (await this.core.snapshot()).initiative?.records ?? []
+    for (const record of records) {
+      if (record.status === 'dispatching' && !agents.some(agent => agent.session.id === record.sessionId)) {
+        await this.core.saveInteraction({ ...record, status: 'uncertain', note: 'The original conversation is unavailable after restart; inspect its receipt before any retry.' })
+      } else if (record.status === 'pending') await this.process(record, this.lifetime.signal)
+    }
   }
 
   /**
@@ -202,21 +274,24 @@ export class SocialInitiative {
   private async reconcile(session: Session, agent?: Agent): Promise<void> {
     const state = await this.core.snapshot()
     for (const record of state.initiative?.records ?? []) {
-      if (record.status !== 'dispatching' || record.sessionId !== session.id) continue
+      if (!['dispatching', 'uncertain'].includes(record.status) || record.sessionId !== session.id) continue
       const projected = this.ctx.sessionProjections.stateOf(session, 'genesisInitiative')
       if (projected?.id === record.id && projected.receipt !== null) {
         const receipt = projected.receipt
         await this.core.saveInteraction({ ...record, status: receipt.interrupted ? 'uncertain' : 'sent',
           message: receipt.text, messageSeq: receipt.seq, ...(receipt.interrupted ? {} : { sentAt: receipt.timestamp }),
           note: receipt.interrupted ? 'An interrupted assistant prefix is visible; do not automatically resend.' : 'Confirmed assistant message committed to the Harness conversation.' })
+        this.failure = null
         if (record.decisionId !== undefined) {
           const source = await this.core.observe({ sessionId: session.id, eventId: String(receipt.seq), timestamp: receipt.timestamp, kind: 'assistant-message' })
           await this.core.settleDecision(record.decisionId, receipt.interrupted ? 'interrupted' : 'responded', [source.id])
         }
-      } else if ((projected?.id === record.id && projected.ended) || (agent !== undefined
+      } else if (record.status === 'dispatching' && ((projected?.id === record.id && projected.ended) || (agent !== undefined
         && ![...agent.inbox.nextTurn, ...agent.inbox.nextStep].some(message => message.source.kind === 'genesis-initiative'
-          && message.source.interactionId === record.id) && agent.status === 'idle')) {
-        await this.core.saveInteraction({ ...record, status: 'uncertain', note: 'No confirmed assistant receipt or queued notice. Inspect the Session before any manual retry.' })
+          && message.source.interactionId === record.id) && agent.status === 'idle'))) {
+        await this.core.saveInteraction({ ...record, status: 'uncertain', note: projected?.failure
+          ? `The proactive turn failed (${projected.failure}) without a confirmed assistant receipt. Inspect the Session before retrying.`
+          : 'No confirmed assistant receipt or queued notice. Inspect the Session before any manual retry.' })
         this.ctx.logger.warn('Genesis proactive delivery outcome is uncertain; automatic resend is disabled. Inspect the originating Session.')
       }
     }
@@ -226,6 +301,7 @@ export class SocialInitiative {
   async close(): Promise<void> {
     this.lifetime.abort()
     if (this.timer !== undefined) clearTimeout(this.timer)
+    this.nextCheckAt = null
     this.unsubscribe?.()
     await this.tail
   }

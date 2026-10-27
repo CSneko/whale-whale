@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { randomUUID } from 'node:crypto'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { readBackup } from '../src/backup.ts'
 import { manifestSchema } from '../src/storage-layout.ts'
@@ -18,7 +18,7 @@ import { joinState } from '../src/storage-state.ts'
 import { ScriptedModel } from './adapter.ts'
 import * as Genesis from '../src/index.ts'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
-import type { MemoryConfig, RecordsConfig } from '../src/config.ts'
+import type { MemoryConfig, RecordsConfig, EmotionConfig, SocialInitiativeConfig } from '../src/config.ts'
 import type { WritingRead } from '../src/records-model.ts'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import type { MemoryId, MemoryOrganizationId, MemoryOrganizationRequest } from '../src/status-types.ts'
@@ -29,6 +29,7 @@ import { LifeEmotionEngine, EMOTION_DECISION_PROMPT, EMOTION_QUESTION, EMOTION_C
 import { emotionUpdateSchema } from '../src/emotion-state.ts'
 import { memoryModels } from '../src/model-preferences.ts'
 import { auxiliaryCall } from '../src/auxiliary-call.ts'
+import { deliberationPlanSchema } from '../src/agency-state.ts'
 import { outsideTempWorkspaceParent } from '../../../../scripts/snapshot-workspace-parent.ts'
 
 const disposers: Array<() => Promise<unknown>> = []
@@ -47,8 +48,8 @@ function genesisAuditRecord(event: SessionEvent) {
   return { ...record, data }
 }
 async function boot(root: string, enabled = true, memory?: MemoryConfig, awakening = false, credentials = false,
-  presets = false, persisted = false, emotion = false, personal = false, records?: Partial<RecordsConfig>, interest = false,
-  deliberation = false, social = false) {
+  presets = false, persisted = false, emotion: boolean | Partial<EmotionConfig> = false, personal = false, records?: Partial<RecordsConfig>, interest = false,
+  deliberation = false, social: boolean | Partial<SocialInitiativeConfig> = false) {
   const configPath = join(root, 'cordis.yml')
   await writeFile(configPath, [
     ...(credentials ? ["- name: '@deepseek-ai/dsh-credentials-local'", '  config:',
@@ -69,10 +70,11 @@ async function boot(root: string, enabled = true, memory?: MemoryConfig, awakeni
       ...['life', 'standard', 'ptc', 'minimal', 'cordis'].flatMap(id => ["- name: '@deepseek-ai/dsh-agent-preset'",
         `  config: { id: ${id}, plugins: ${id === 'life' ? "[{ name: '@deepseek-ai/dsh-time-context' }]" : '[]'} }`])] : []),
     "- name: '@deepseek-ai/dsh-experimental-genesis'", `  disabled: ${!enabled}`, '  config:', `    leasePath: ${JSON.stringify(join(root, 'writer.lock'))}`,
-    ...(emotion ? ['    emotion: {}'] : []),
+    ...(emotion ? [`    emotion: ${JSON.stringify(emotion === true ? {} : emotion)}`] : []),
     ...(interest ? ['    interest: {}'] : []),
     ...(deliberation ? ['    deliberation: {}'] : []),
-    ...(social ? ['    socialInitiative: { sessionId: social-test, intervalMs: 86400000, minSendIntervalMs: 0, maxPer24Hours: 1, userIdleMs: 0 }'] : []),
+    ...(social ? [`    socialInitiative: ${JSON.stringify({ sessionId: 'social-test', intervalMs: 86400000,
+      minSendIntervalMs: 0, maxPer24Hours: 1, userIdleMs: 0, ...(social === true ? {} : social) })}`] : []),
     ...(personal ? [`    personalDirectory: ${JSON.stringify(join(root, 'personal'))}`] : []),
     ...(records === undefined ? [] : [`    records: ${JSON.stringify(records)}`]),
     ...(memory === undefined ? [] : [`    memory: ${JSON.stringify(memory)}`]),
@@ -263,7 +265,7 @@ it('cancels deliberation before admission without task effects and withdraws its
   expect(effects).toBe(1)
 })
 
-it('deliberation commits visible historical references and read-only failure echoes, but reports forged evidence without admitting work', async () => {
+it('deliberation round-trips editable evidence and rejects forged references or unknown fields before admission', async () => {
   const root = await directory()
   const { config } = await embeddingFixture()
   config.associationLimit = 0
@@ -286,30 +288,37 @@ it('deliberation commits visible historical references and read-only failure ech
   // Age evidence out of the recent event window while keeping it in selected memories and interests.
   for (let index = 0; index < 25; index++) await ctx.genesis.observe({ sessionId, eventId: `later-${index}`,
     kind: 'assistant-message', timestamp: '2026-10-25T00:00:02.000Z' })
-  let forged = false
+  let invalid: 'source' | 'field' | undefined
   const factors = { motivation: 0.7, interest: 0.5, commitment: 0.6, emotion: 0.2, needs: 0.5,
     benefit: 0.8, cost: 0.2, risk: 0.1, urgency: 0.4, relationship: 0.5, context: 0.8 }
   class EvidenceWriter extends LlmAdapter {
     override async resolveModel(provider: string, model: string) { return { provider, id: model, name: model } }
     override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+      const responseSchema: unknown = JSON.parse((options.system ?? '').split('Response JSON Schema:\n')[1]!.split('\n')[0]!)
+      expect(responseSchema).toEqual(z.toJSONSchema(deliberationPlanSchema, { io: 'input' }))
+      expect(responseSchema).toMatchObject({ properties: { motivations: { items: { additionalProperties: false } } } })
       const input = z.object({ sourceEventIds: z.array(z.string()).max(20), memoryIds: z.array(z.string()),
-        interestIds: z.array(z.string()), goals: z.array(z.record(z.string(), z.unknown())) }).parse(JSON.parse(
+        interestIds: z.array(z.string()), goals: z.array(z.record(z.string(), z.unknown())),
+        motivations: deliberationPlanSchema.shape.motivations }).parse(JSON.parse(
         options.messages.flatMap(message => message.content).filter(block => block.type === 'text').map(block => block.text).join('')))
       expect(input.sourceEventIds).toContain(historic)
       expect(input.sourceEventIds).toContain(source.id)
       expect(input.memoryIds).toContain(memory.id)
       expect(input.interestIds).toContain(interest.id)
       const old = input.goals[0]
+      for (const item of input.goals) {
+        expect(item).not.toHaveProperty('createdAt')
+        expect(item).not.toHaveProperty('updatedAt')
+        expect(item).not.toHaveProperty('history')
+      }
       const goal = old === undefined ? { content: 'Review sourced growth', reason: 'Understand recorded experience.', origin: 'autonomous',
         motivationIds: [], memoryIds: [memory.id], sourceEventIds: [historic, source.id], priority: 0.5,
-        status: 'active', nextAction: 'Read one growth record.' } : (() => {
-        const { createdAt: _createdAt, updatedAt: _updatedAt, ...proposal } = old
-        return proposal
-      })()
-      const response = JSON.stringify({ motivations: old === undefined || forged ? [{ content: 'Understand sourced growth',
+        status: 'active', nextAction: 'Read one growth record.' } : old
+      const response = JSON.stringify({ motivations: old === undefined || invalid !== undefined ? [{ content: 'Understand sourced growth',
         reason: 'A sourced inclination.', strength: 0.7, status: 'active', interestIds: [interest.id], memoryIds: [memory.id],
-        sourceEventIds: forged ? [randomUUID()] : [historic, source.id] }] : [],
-      goals: forged ? [] : [{ ...goal, failures: 999 }],
+        sourceEventIds: invalid === 'source' ? [randomUUID()] : [historic, source.id],
+        ...(invalid === 'field' ? { 'private-fixture-field': 'private-fixture-value' } : {}) }] : input.motivations,
+      goals: invalid !== undefined ? [] : [{ ...goal, failures: 999 }],
       candidates: [{ disposition: 'wait', action: 'Wait for another event.', reason: 'There is no urgent work.', factors,
         goalIds: [], motivationIds: [] }], selected: 0, reason: 'Retain a sourced commitment without starting work.' })
       yield { type: 'block-start', index: 0, blockType: 'text' }
@@ -328,16 +337,24 @@ it('deliberation commits visible historical references and read-only failure ech
   expect(first.sourceEventIds).toContain(historic)
   expect(second.sourceEventIds).toContain(historic)
   const before = await ctx.genesis.snapshot()
+  expect(before.agency!.motivations).toHaveLength(1)
+  expect(before.agency!.motivations[0]!.createdAt).toBeDefined()
   expect(before.agency!.goals[0]!.failures).toBe(0)
   expect(before.agency!.goals[0]!.history).toHaveLength(2)
   const requests = agent.session.ownEvents().map(genesisAuditRecord).filter(record => record?.data.role === 'deliberation-writer')
   expect(requests).toHaveLength(2)
-  forged = true
-  agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Consider a new request.' }] }))
-  await agent.whenIdle()
-  const ending = agent.session.ownEvents().findLast(event => event.type === 'turn/end')
-  expect(ending).toMatchObject({ data: { reason: { kind: 'error', error: { code: 'GENESIS_DELIBERATION_FAILED',
-    message: expect.stringContaining('outside the selected context') } } } })
+  for (invalid of ['source', 'field'] as const) {
+    agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: `Consider another request (${invalid}).` }] }))
+    await agent.whenIdle()
+    const ending = agent.session.ownEvents().findLast(event => event.type === 'turn/end')
+    expect(ending).toMatchObject({ data: { reason: { kind: 'error', error: { code: 'GENESIS_DELIBERATION_FAILED' } } } })
+    expect(JSON.stringify(ending)).toContain(invalid === 'source'
+      ? 'outside the selected context' : 'motivations.0: unrecognized_keys; unknown fields=1')
+    expect(JSON.stringify(ending)).not.toContain('private-fixture')
+    expect((await ctx.genesis.snapshot()).agency).toEqual(before.agency)
+  }
+  const responses = agent.session.ownEvents().map(genesisAuditRecord).filter(record => record?.data.phase === 'response')
+  expect(JSON.stringify(responses)).toContain('private-fixture-field')
   expect(chat.requests).toHaveLength(0)
   expect((await ctx.genesis.snapshot()).agency).toEqual(before.agency)
   await ctx.fiber.dispose()
@@ -388,6 +405,135 @@ it.each([24000, 2400])('deliberation omits whole over-budget evidence records an
   expect(choice.outcome.status).toBe('waiting')
 })
 
+function socialPlan(disposition: 'accept' | 'wait') {
+  return JSON.stringify({ motivations: [], goals: [], candidates: [{ disposition, action: 'Share a grounded thought.',
+    reason: 'There is a recorded topic to consider.', goalIds: [], motivationIds: [],
+    factors: { motivation: 0.5, interest: 0.5, commitment: 0, emotion: 0.5, needs: 0.5, benefit: 0.5,
+      cost: 0.1, risk: 0.1, urgency: 0, relationship: 0.5, context: 0.5 } }], selected: 0, reason: 'Consider one grounded thought.' })
+}
+
+it('persists proactive policy through the gateway, rearms the real timer, honors silence and rejects stale settings', async () => {
+  const root = await directory()
+  const { config } = await embeddingFixture()
+  const ctx = await boot(root, true, config, false, false, false, false, true, false, undefined, false, true, { enabled: false })
+  const signal = new AbortController().signal
+  const initial = await ctx.genesisInitiativeStatus.inspect(signal)
+  expect(initial.mode).toBe('paused')
+  expect(initial.nextCheckAt).toBeNull()
+  const writer = new ScriptedModel(Array<string>(10).fill(socialPlan('wait')))
+  ctx.llm.registerAdapter(['memory-writer'], writer)
+  const chat = new ScriptedModel([])
+  ctx.llm.registerAdapter(['fixture'], chat)
+  await ctx.agentLoop.create(SessionId('social-test'), { provider: 'fixture', model: 'chat' })
+  await ctx.genesis.observe({ sessionId: SessionId('social-test'), eventId: 'timer-grounding', kind: 'user-message', timestamp: new Date().toISOString() })
+  const policy = { ...initial.settings!, enabled: true, intervalMs: 1000 }
+  expect(await ctx.genesisInitiativeStatus.saveSettings(policy, initial.revision, signal)).toBe(1)
+  await expect.poll(async () => (await ctx.genesisInitiativeStatus.inspect(signal)).records.some(item => item.choice === 'wait'),
+    { timeout: 5000 }).toBe(true)
+  const checked = await ctx.genesisInitiativeStatus.inspect(signal)
+  expect(checked.records[0]).toMatchObject({ choice: 'wait', record: { status: 'skipped' } })
+  expect(checked.lastCheckAt).not.toBeNull()
+  expect(chat.requests).toHaveLength(0)
+  await expect(ctx.genesisInitiativeStatus.saveSettings(policy, initial.revision, signal)).rejects.toThrow('Reload')
+  await expect(ctx.genesisInitiativeStatus.saveSettings({ ...policy, intervalMs: 0 }, 1, signal)).rejects.toThrow()
+  const paused = { ...policy, enabled: false }
+  await ctx.genesisInitiativeStatus.saveSettings(paused, 1, signal)
+  await expect.poll(async () => (await ctx.genesisInitiativeStatus.inspect(signal)).nextCheckAt).toBeNull()
+  await ctx.fiber.dispose()
+  const second = await boot(root, true, config, false, false, false, false, true, false, undefined, false, true, true)
+  const restored = await second.genesisInitiativeStatus.inspect(signal)
+  expect(restored.settings).toEqual(paused)
+  expect(restored.revision).toBe(2)
+  expect(restored.mode).toBe('paused')
+  expect(restored.records.some(item => item.record.status === 'skipped')).toBe(true)
+})
+
+it('enforces proactive cooldown, quiet time and pause at dispatch while keeping one decision per opportunity', async () => {
+  const root = await directory()
+  const { config } = await embeddingFixture()
+  const ctx = await boot(root, true, config, false, false, false, false, true, false, undefined, false, true,
+    { maxPer24Hours: 2, minSendIntervalMs: 60000 })
+  const writer = new ScriptedModel([socialPlan('accept'), socialPlan('accept')])
+  const chat = new ScriptedModel(['First proactive message.', 'Second proactive message.'])
+  ctx.llm.registerAdapter(['memory-writer'], writer)
+  ctx.llm.registerAdapter(['fixture'], chat)
+  const agent = await ctx.agentLoop.create(SessionId('social-test'), { provider: 'fixture', model: 'chat' })
+  const source = await ctx.genesis.observe({ sessionId: agent.session.id, eventId: 'rate-grounding', kind: 'user-message', timestamp: new Date().toISOString() })
+  await ctx.genesisInitiative.considerInteraction({ key: 'first-rate-choice', sourceEventId: source.id })
+  await agent.whenIdle()
+  await ctx.genesisInitiative.resume()
+  const pending = await ctx.genesisInitiative.considerInteraction({ key: 'second-rate-choice', sourceEventId: source.id })
+  expect(pending.status).toBe('pending')
+  expect(pending.note).toContain('cooldown')
+  const signal = new AbortController().signal
+  const sample = await ctx.genesisInitiativeStatus.inspect(signal)
+  await ctx.genesisInitiativeStatus.saveSettings({ ...sample.settings!, enabled: false }, sample.revision, signal)
+  await expect(ctx.genesis.saveInteraction({ ...pending, status: 'dispatching' })).rejects.toThrow('paused')
+  await ctx.genesisInitiative.resume()
+  expect(chat.requests).toHaveLength(1)
+  const paused = await ctx.genesisInitiativeStatus.inspect(signal)
+  await ctx.genesisInitiativeStatus.saveSettings({ ...paused.settings!, enabled: true, minSendIntervalMs: 0, userIdleMs: 86400000 }, paused.revision, signal)
+  await ctx.genesisInitiative.resume()
+  expect((await ctx.genesis.snapshot()).initiative!.records.find(item => item.id === pending.id)!.note).toContain('quiet interval')
+  const quiet = await ctx.genesisInitiativeStatus.inspect(signal)
+  await ctx.genesisInitiativeStatus.saveSettings({ ...quiet.settings!, userIdleMs: 0 }, quiet.revision, signal)
+  await ctx.genesisInitiative.resume()
+  await agent.whenIdle()
+  await ctx.genesisInitiative.resume()
+  expect((await ctx.genesis.snapshot()).initiative!.records.find(item => item.id === pending.id)!.status).toBe('sent')
+  expect(chat.requests).toHaveLength(2)
+  expect(writer.requests).toHaveLength(2)
+})
+
+it('preserves an enqueue failure as an uncertain reservation across restart rather than resending it', async () => {
+  const root = await directory()
+  const { config } = await embeddingFixture()
+  const ctx = await boot(root, true, config, false, false, false, false, false, false, undefined, false, true, true)
+  ctx.llm.registerAdapter(['memory-writer'], new ScriptedModel([socialPlan('accept')]))
+  const chat = new ScriptedModel([])
+  ctx.llm.registerAdapter(['fixture'], chat)
+  const agent = await ctx.agentLoop.create(SessionId('social-test'), { provider: 'fixture', model: 'chat' })
+  const source = await ctx.genesis.observe({ sessionId: agent.session.id, eventId: 'enqueue-grounding', kind: 'user-message', timestamp: new Date().toISOString() })
+  const reject = vi.spyOn(agent, 'followup').mockImplementation(() => { throw new Error('Fixture channel rejected enqueue.') })
+  try {
+    await expect(ctx.genesisInitiative.considerInteraction({ key: 'enqueue-failure', sourceEventId: source.id })).rejects.toThrow('rejected enqueue')
+  } finally { reject.mockRestore() }
+  expect((await ctx.genesis.snapshot()).initiative!.records[0]!.status).toBe('dispatching')
+  expect(chat.requests).toHaveLength(0)
+  await ctx.fiber.dispose()
+  const second = await boot(root, true, config, false, false, false, false, false, false, undefined, false, true, true)
+  const record = await second.genesisInitiative.considerInteraction({ key: 'enqueue-failure', sourceEventId: source.id })
+  expect(record.status).toBe('uncertain')
+  const sample = await second.genesisInitiativeStatus.inspect(new AbortController().signal)
+  expect(sample.counts.uncertain).toBe(1)
+  expect(sample.counts.dispatching).toBe(0)
+})
+
+it('reports a failed proactive conversation turn without creating a sent receipt or automatically retrying it', async () => {
+  const root = await directory()
+  const { config } = await embeddingFixture()
+  const ctx = await boot(root, true, config, false, false, false, false, false, false, undefined, false, true, true)
+  ctx.llm.registerAdapter(['memory-writer'], new ScriptedModel([socialPlan('accept')]))
+  class FailedDelivery extends LlmAdapter {
+    override async resolveModel(provider: string, model: string) { return { provider, id: model, name: model } }
+    override async *stream(): AsyncIterable<StreamChunk> {
+      yield { type: 'finish', reason: { kind: 'error', failure: { code: 'FIXTURE_DELIVERY_FAILED', message: 'Fixture provider failed.' } } }
+    }
+  }
+  ctx.llm.registerAdapter(['fixture'], new FailedDelivery())
+  const agent = await ctx.agentLoop.create(SessionId('social-test'), { provider: 'fixture', model: 'chat' })
+  const source = await ctx.genesis.observe({ sessionId: agent.session.id, eventId: 'delivery-grounding', kind: 'user-message', timestamp: new Date().toISOString() })
+  await ctx.genesisInitiative.considerInteraction({ key: 'failed-conversation', sourceEventId: source.id })
+  await agent.whenIdle()
+  await ctx.genesisInitiative.resume()
+  const sample = await ctx.genesisInitiativeStatus.inspect(new AbortController().signal)
+  expect(sample.counts.sent).toBe(0)
+  expect(sample.records[0]!.record.status).toBe('uncertain')
+  expect(sample.records[0]!.record.note).toContain('FIXTURE_DELIVERY_FAILED')
+  expect(sample.records[0]!.record.sentAt).toBeUndefined()
+  expect(agent.session.ownEvents().filter(event => event.type === 'assistant/message')).toHaveLength(0)
+})
+
 it('delivers one proactive choice as an assistant message, honors silence, and restores the committed receipt without replay', async () => {
   const root = await directory()
   const { config } = await embeddingFixture()
@@ -431,6 +577,10 @@ it('delivers one proactive choice as an assistant message, honors silence, and r
   await first.genesisInitiative.resume()
   const committed = (await first.genesis.snapshot()).initiative!.records.find(item => item.key === 'speak-choice')!
   expect(committed).toMatchObject({ status: 'sent', message: 'A thought I wanted to share.', sessionId, reason: expect.any(String) })
+  const deliveryStatus = await first.genesisInitiativeStatus.inspect(new AbortController().signal)
+  expect(deliveryStatus.lastMessage?.message).toBe('A thought I wanted to share.')
+  expect(deliveryStatus.lastMessage?.status).toBe('sent')
+  expect(JSON.stringify(deliveryStatus).length).toBeLessThanOrEqual(16000)
   const socialInput = agent.session.ownEvents().find(event => event.type === 'user/message'
     && event.data.source.kind === 'genesis-initiative')
   expect(socialInput?.type).toBe('user/message')
@@ -440,6 +590,7 @@ it('delivers one proactive choice as an assistant message, honors silence, and r
   expect(receipts.at(-1)?.type === 'assistant/message'
     && receipts.at(-1)?.data.message.content).toContainEqual({ type: 'text', text: 'A thought I wanted to share.' })
   expect(first.genesis.permitsDecision(committed.decisionId!)).toBe(false)
+  expect(JSON.stringify(chat.requests[1])).toContain('Optional proactive conversation uses a configured Harness conversation channel')
   const limited = await first.genesisInitiative.considerInteraction({ key: 'daily-limit', sourceEventId: source.id })
   expect(limited.status).toBe('pending')
   expect(limited.note).toContain('Rolling proactive message limit reached')
@@ -474,6 +625,35 @@ it('keeps a proactive choice pending when no idle Harness conversation can recei
   expect(result.note).toContain('No idle character conversation channel')
   expect(writer.requests).toHaveLength(0)
   expect((await ctx.genesis.snapshot()).initiative!.records.find(item => item.key === 'offline-choice')!.status).toBe('pending')
+  const status = await ctx.genesisInitiativeStatus.inspect(new AbortController().signal)
+  expect(status.mode).toBe('waiting-channel')
+  expect(status.counts.sent).toBe(0)
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(Date.now() + 86400001)
+  try {
+    await ctx.genesisInitiative.resume()
+    expect((await ctx.genesis.snapshot()).initiative!.records[0]!.status).toBe('skipped')
+    expect(writer.requests).toHaveLength(0)
+  } finally { vi.useRealTimers() }
+})
+
+it('keeps proactive model failures visible and pending without admitting a conversation message', async () => {
+  const root = await directory()
+  const { config } = await embeddingFixture()
+  const ctx = await boot(root, true, config, false, false, false, false, false, false, undefined, false, true, true)
+  ctx.llm.registerAdapter(['memory-writer'], new ScriptedModel(['{"motivations":[{"private-fixture":true}]}']))
+  const chat = new ScriptedModel([])
+  ctx.llm.registerAdapter(['fixture'], chat)
+  const agent = await ctx.agentLoop.create(SessionId('social-test'), { provider: 'fixture', model: 'chat' })
+  const source = await ctx.genesis.observe({ sessionId: agent.session.id, eventId: 'failed-proposal', kind: 'user-message', timestamp: new Date().toISOString() })
+  await expect(ctx.genesisInitiative.considerInteraction({ key: 'bad-model-choice', sourceEventId: source.id })).rejects.toThrow('Genesis deliberation failed')
+  const status = await ctx.genesisInitiativeStatus.inspect(new AbortController().signal)
+  expect(status.mode).toBe('failed')
+  expect(status.failure?.message).toContain('validation')
+  expect(JSON.stringify(status)).not.toContain('private-fixture')
+  expect(status.records[0]!.record.status).toBe('pending')
+  expect(status.records[0]!.record.note).toContain('validation')
+  expect(chat.requests).toHaveLength(0)
 })
 
 it('loads interest review through Cordis, logs the formed contact and restores it in another Session', async () => {
@@ -1942,6 +2122,19 @@ it('uses an independent Jev emotion question and logged HTTP writer, and contain
 })
 
 
+it('checkpoints the online-only emotion clock through Loader without creating experiences or changing revisions', async () => {
+  const root = await directory()
+  const { config } = await embeddingFixture()
+  const ctx = await boot(root, true, config, false, false, false, false, { offlineChanges: false, clockCheckpointMs: 1000 })
+  const initial = await ctx.genesis.snapshot()
+  await expect.poll(async () => (await ctx.genesis.snapshot()).emotion!.updatedAt).not.toBe(initial.emotion!.updatedAt)
+  const sampled = await ctx.genesis.snapshot()
+  expect(sampled.emotion!.revision).toBe(initial.emotion!.revision)
+  expect(sampled.events).toEqual(initial.events)
+  expect((await readBackup(join(root, 'writer.lock.backup.json'))).emotion).toEqual(sampled.emotion)
+  await ctx.fiber.dispose()
+})
+
 it('persists operator emotion sensitivity and adjustments, rejects stale or invalid edits, and pauses only emotion inference', async () => {
   const root = await directory()
   const embeddings = await embeddingFixture()
@@ -1950,11 +2143,14 @@ it('persists operator emotion sensitivity and adjustments, rejects stale or inva
   const signal = new AbortController().signal
   const original = (await first.genesisStatus.inspect(signal)).emotion!
   const settings = { ...original.settings, sensitivity: 0.5, enabled: false, windowTurns: 6,
+    offlineChanges: false, moodEmotionScale: 0.3, emotionMoodInfluence: 0.2,
     baseline: { ...original.settings.baseline, valence: 0.2 } }
   expect(await first.genesisStatus.saveEmotionSettings(settings, original.revision, signal)).toBe(1)
   await expect(first.genesisStatus.saveEmotionSettings(settings, original.revision, signal)).rejects.toThrow('Emotion changed')
   await expect(first.genesisStatus.saveEmotionSettings({ ...settings, sensitivity: -0.1 }, 1, signal)).rejects.toThrow()
   await expect(first.genesisStatus.saveEmotionSettings({ ...settings, sensitivity: 2.1 }, 1, signal)).rejects.toThrow()
+  await expect(first.genesisStatus.saveEmotionSettings({ ...settings, emotionMoodInfluence: 0.51 }, 1, signal)).rejects.toThrow()
+  await expect(first.genesisStatus.saveEmotionSettings({ ...settings, moodEmotionScale: 1.01 }, 1, signal)).rejects.toThrow()
   const invalidBaseline = { ...settings.baseline, fear: 2 }
   await expect(first.genesisStatus.saveEmotionSettings({ ...settings, baseline: invalidBaseline }, 1, signal)).rejects.toThrow()
   await expect(first.genesisStatus.saveEmotionSettings({ ...settings,
@@ -1986,7 +2182,11 @@ it('persists operator emotion sensitivity and adjustments, rejects stale or inva
   agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Continue normally.' }], source: { kind: 'user' } }))
   await agent.whenIdle()
   expect(decisions.requests).toHaveLength(1)
-  expect((await second.genesis.snapshot()).emotion).toEqual(adjusted.emotion)
+  const afterPausedTurn = (await second.genesis.snapshot()).emotion!
+  expect(afterPausedTurn.revision).toBe(adjusted.emotion!.revision)
+  expect(afterPausedTurn.relationship).toEqual(adjusted.emotion!.relationship)
+  expect(afterPausedTurn.controls).toEqual(adjusted.emotion!.controls)
+  expect(afterPausedTurn.current.happiness).toBeCloseTo(adjusted.emotion!.current.happiness, 5)
   expect(JSON.stringify(chat.requests[0])).toContain('Current simulated emotion')
   await second.genesisStatus.adjustRelationship({ label: 'Operator', values, reason: 'Explicit estimate.' }, restored.revision, signal)
   const manuallyAdjusted = (await second.genesisStatus.inspect(signal)).emotion!

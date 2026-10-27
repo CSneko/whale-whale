@@ -19,7 +19,8 @@ export function emotionFixture(chinese = false) {
   const status: LifeStatus = { ...statusFixture(), emotion: { version: 3, revision: 4, updatedAt: '2026-10-24T00:00:00.000Z',
     current, relationship: null, mood, needs, baseline: { ...mood }, shortHalfLifeMs: short, moodHalfLifeMs: long,
     sensitivity: 1, needsHalfLifeMs: 21600000, interactionHalfLifeMs: 21600000,
-    settings: { enabled: true, sensitivity: 1, maxNeedsDelta: 0.08, needsHalfLifeMs: 21600000, interactionHalfLifeMs: 21600000,
+    settings: { enabled: true, offlineChanges: true, moodEmotionScale: 0.2, emotionMoodInfluence: 0.25,
+      sensitivity: 1, maxNeedsDelta: 0.08, needsHalfLifeMs: 21600000, interactionHalfLifeMs: 21600000,
       relationshipEnabled: true, maxRelationshipDelta: 0.01, moodSupportTurns: 3, importantEventThreshold: 0.8, repetitionDiscount: 0.5,
       windowTurns: 4, maxDelta: 0.25, maxMoodDelta: 0.04, contextStep: 0.05,
       baseline: { ...mood }, shortHalfLifeMs: short, moodHalfLifeMs: long }, history: [], omitted: 0 } }

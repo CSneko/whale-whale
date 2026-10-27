@@ -4,6 +4,7 @@ import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import { GenesisAgencyGateway } from './agency-gateway.ts'
+import { GenesisInitiativeGateway } from './initiative-gateway.ts'
 import { SocialInitiative } from './social.ts'
 import { initiativeProjection } from './social-projection.ts'
 import { LifeDeliberationEngine, DELIBERATION_GUIDANCE, agencyContext } from './deliberation.ts'
@@ -48,6 +49,7 @@ export { GenesisMemoryGateway } from './memory-gateway.ts'
 export { GenesisStatusGateway } from './status.ts'
 export { GenesisRecordsGateway } from './records-gateway.ts'
 export { GenesisAgencyGateway } from './agency-gateway.ts'
+export { GenesisInitiativeGateway } from './initiative-gateway.ts'
 export type { LifeStatus, AgencyStatus } from './status-types.ts'
 export { LifeCore } from './core.ts'
 export { GenesisError } from './error.ts'
@@ -119,6 +121,23 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     try { await core.close() } finally { await release() }
   })
   ctx.provide('genesis', core)
+  if (config.emotion !== undefined) {
+    const interval = config.emotion.clockCheckpointMs
+    ctx.effect(() => {
+      const lifetime = new AbortController()
+      let timer: ReturnType<typeof setTimeout>
+      const schedule = () => {
+        timer = setTimeout(() => {
+          void core.checkpointEmotion().then(() => { if (!lifetime.signal.aborted) schedule() }, (error: unknown) => {
+            if (!lifetime.signal.aborted) ctx.logger.error(`Genesis emotion clock stopped. Reload after inspecting storage. ${statusFailure(error).message}`)
+          })
+        }, interval)
+        timer.unref()
+      }
+      schedule()
+      return () => { lifetime.abort(); clearTimeout(timer) }
+    })
+  }
   const personal = config.personalDirectory === undefined ? undefined : await preparePersonalDirectory(ctx, core, config.personalDirectory)
   let records: WritingRecords | undefined
   if (config.records !== undefined && personal !== undefined) {
@@ -212,6 +231,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   ctx.effect(() => ctx.sessionProjections.register(manualMemoryProjection))
   await ctx.plugin(GenesisMemoryGateway, { memory, config, consolidation })
   await ctx.plugin(GenesisAgencyGateway, { config, lifeMode })
+  await ctx.plugin(GenesisInitiativeGateway, { config, engine: social, applies: (agent: Agent) => config.awakening === undefined || lifeMode(agent) })
   await ctx.plugin(GenesisStatusGateway, { config, preferences, models, memory, emotion, interest, lifeMode })
   const contexts = new Map<object, string>()
   const associations = new Map<object, string>()

@@ -2,6 +2,7 @@
 import { z } from 'zod'
 import type { EmotionConfig } from './config.ts'
 import { relationshipSchema, appraisalSchema, relationshipDeltaSchema } from './relationship-state.ts'
+import { evolveAffect } from './affect-dynamics.ts'
 
 const intensity = z.number().min(0).max(1)
 const duration = z.number().min(1000).max(31536000000)
@@ -40,9 +41,13 @@ export const emotionControlsSchema = z.strictObject({ enabled: z.boolean(),
   importantEventThreshold: intensity, repetitionDiscount: intensity })
 const recoverySchema = z.strictObject({ sensitivity: z.number().min(0).max(2), baseline: moodSchema,
   shortHalfLifeMs: emotionHalfLivesSchema, moodHalfLifeMs: moodHalfLivesSchema,
-  needsHalfLifeMs: duration, interactionHalfLifeMs: duration })
+  needsHalfLifeMs: duration, interactionHalfLifeMs: duration,
+  offlineChanges: z.boolean().optional(), moodEmotionScale: intensity.optional(),
+  emotionMoodInfluence: z.number().min(0).max(0.5).optional() })
 /** Complete operator settings; mood recovery cannot be faster than any immediate feeling. */
-export const emotionSettingsSchema = emotionControlsSchema.extend(recoverySchema.shape).superRefine((settings, context) => {
+export const emotionSettingsSchema = emotionControlsSchema.extend(recoverySchema.shape).extend({
+  offlineChanges: z.boolean(), moodEmotionScale: intensity, emotionMoodInfluence: z.number().min(0).max(0.5),
+}).superRefine((settings, context) => {
   if (Math.min(...Object.values(settings.moodHalfLifeMs)) < Math.max(...Object.values(settings.shortHalfLifeMs))) {
     context.addIssue({ code: 'custom', path: ['moodHalfLifeMs'], message: 'Mood recovery must be slower than immediate emotion recovery.' })
   }
@@ -54,10 +59,13 @@ export const emotionAdjustmentSchema = z.strictObject({ current: emotionCurrentS
   needs: needsSchema, reason: z.string().trim().min(1).max(1000) })
 /** Absolute state adjustment; it never counts as a new experience. */
 export type EmotionAdjustment = z.infer<typeof emotionAdjustmentSchema>
-/** Current generation only; old anchors require an operator's offline conversion. */
+/** Version-three anchors accept either all evolution fields or the legacy independent-recovery representation. */
 export const emotionStateSchema = recoverySchema.extend({ version: z.literal(3), revision: z.number().int().nonnegative(),
   updatedAt: z.iso.datetime(), controls: emotionControlsSchema.optional(), current: emotionCurrentSchema, mood: moodSchema,
-  needs: needsSchema, relationship: relationshipSchema.nullable() })
+  needs: needsSchema, relationship: relationshipSchema.nullable() }).refine((state) => {
+  const present = [state.offlineChanges, state.moodEmotionScale, state.emotionMoodInfluence].filter(value => value !== undefined).length
+  return present === 0 || present === 3
+}, 'Evolution settings must be present together')
 /** Durable state; historical event payloads retain their original representation. */
 export type EmotionState = z.infer<typeof emotionStateSchema>
 /** Strict currently supported anchor. */
@@ -89,7 +97,7 @@ export function lonelinessTarget(needs: Needs): number {
 
 /**
  * Recover feelings quickly, mood slowly and loneliness continuously without inventing offline events.
- * @param state - Committed recovery anchor.
+ * @param state - Committed recovery anchor; LifeCore rebases excluded stopped intervals before sampling.
  * @param now - Observation time; backwards clocks leave the anchor unchanged.
  * @returns Detached sampled state; no model call or durable mutation occurs.
  */
@@ -97,12 +105,7 @@ export function emotionAt(state: EmotionState, now: string): EmotionState {
   const result = structuredClone(state)
   const duration = Math.max(0, Date.parse(now) - Date.parse(state.updatedAt))
   const elapsed = duration * state.sensitivity
-  for (const key of Object.keys(state.current) as Array<keyof EmotionCurrent>) {
-    result.current[key] *= 2 ** (-elapsed / state.shortHalfLifeMs[key])
-  }
-  for (const key of Object.keys(state.mood) as Array<keyof Mood>) {
-    result.mood[key] = state.baseline[key] + (state.mood[key] - state.baseline[key]) * 2 ** (-elapsed / state.moodHalfLifeMs[key])
-  }
+  Object.assign(result, evolveAffect(state, elapsed))
   // Exact integration preserves the result when observation intervals are subdivided.
   const a = Math.LN2 / state.needsHalfLifeMs
   const b = Math.LN2 / state.interactionHalfLifeMs
@@ -122,13 +125,14 @@ export function emotionAt(state: EmotionState, now: string): EmotionState {
 }
 
 /**
- * Initialize independent affect layers without changing life identity.
+ * Initialize affect layers without changing life identity.
  * @param config - Resolved deployment settings.
  * @param now - Birth time of this projection.
  * @returns Strict version-three state.
  */
 export function initialEmotion(config: EmotionConfig, now: string): EmotionState {
   return { version: 3, revision: 0, updatedAt: now, sensitivity: config.sensitivity,
+    offlineChanges: config.offlineChanges, moodEmotionScale: config.moodEmotionScale, emotionMoodInfluence: config.emotionMoodInfluence,
     current: { happiness: 0, sadness: 0, anger: 0, fear: 0, tenderness: 0, gratitude: 0, longing: 0, frustration: 0, disappointment: 0 },
     mood: { ...config.baseline }, baseline: { ...config.baseline }, needs: { ...config.initialNeeds },
     shortHalfLifeMs: { ...config.shortHalfLifeMs }, moodHalfLifeMs: { ...config.moodHalfLifeMs },
@@ -164,5 +168,7 @@ export function resolveEmotion(config: EmotionConfig, state: EmotionState): Emot
     maxRelationshipDelta: config.maxRelationshipDelta, moodSupportTurns: config.moodSupportTurns,
     importantEventThreshold: config.importantEventThreshold, repetitionDiscount: config.repetitionDiscount, ...state.controls,
     sensitivity: state.sensitivity, baseline: { ...state.baseline }, shortHalfLifeMs: { ...state.shortHalfLifeMs },
-    moodHalfLifeMs: { ...state.moodHalfLifeMs }, needsHalfLifeMs: state.needsHalfLifeMs, interactionHalfLifeMs: state.interactionHalfLifeMs }
+    moodHalfLifeMs: { ...state.moodHalfLifeMs }, needsHalfLifeMs: state.needsHalfLifeMs, interactionHalfLifeMs: state.interactionHalfLifeMs,
+    offlineChanges: state.offlineChanges ?? config.offlineChanges, moodEmotionScale: state.moodEmotionScale ?? config.moodEmotionScale,
+    emotionMoodInfluence: state.emotionMoodInfluence ?? config.emotionMoodInfluence }
 }

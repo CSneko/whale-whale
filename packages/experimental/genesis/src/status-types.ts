@@ -12,6 +12,27 @@ import type { RelationshipState, EmotionAppraisal } from './relationship-state.t
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { Branded } from '@deepseek-ai/dsh-brand'
 export type { WritingId, WritingTypeId, WritingEntry, WritingType, WritingDraft, WritingQuery, WritingMatch, WritingSearch, WritingRead, WritingCatalog } from './records-model.ts'
+import type { InitiativeSettings, InteractionRecord } from './social-state.ts'
+export type { InitiativeSettings, InteractionRecord } from './social-state.ts'
+
+/** Bounded operator view of real proactive delivery state and its active policy. */
+export interface InitiativeStatus {
+  available: boolean
+  revision: number
+  sampledAt: string
+  settings: InitiativeSettings | null
+  mode: 'unavailable' | 'paused' | 'checking' | 'waiting-channel' | 'ready' | 'failed'
+  nextCheckAt: string | null
+  lastCheckAt: string | null
+  failure: { code: string; message: string } | null
+  lastMessage: InteractionRecord | null
+  lastMessageTruncated: boolean
+  channels: Array<{ id: SessionId; idle: boolean }>
+  counts: Record<InteractionRecord['status'], number>
+  records: Array<{ record: InteractionRecord; triggerType: string; choice: LifeDecision['candidates'][number]['disposition'] | null; messageTruncated: boolean }>
+  omitted: number
+  channelsOmitted: number
+}
 
 /** Stable operator request identity retained across organization retries. */
 export type MemoryOrganizationId = Branded<'GenesisMemoryOrganizationId'>

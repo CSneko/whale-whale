@@ -10,7 +10,7 @@ import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-resources/client'
-import type { LifeStatus, AgencyStatus } from '@deepseek-ai/dsh-experimental-genesis/types'
+import type { LifeStatus, AgencyStatus, InitiativeStatus } from '@deepseek-ai/dsh-experimental-genesis/types'
 import type { TypertRemoteContribution, RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { MemoryNotice, type MemoryNoticeActions, type MemoryNoticeState } from './MemoryNotice.tsx'
@@ -19,6 +19,7 @@ import { StatusResource } from './resource.ts'
 import { RelationshipPanel, type RelationshipActions } from './RelationshipPanel.tsx'
 import { EmotionPanel, type EmotionActions } from './EmotionPanel.tsx'
 import { AgencyPanel, type AgencyActions } from './AgencyPanel.tsx'
+import { InitiativePanel, type InitiativeActions } from './InitiativePanel.tsx'
 import { StatusPanel } from './StatusPanel.tsx'
 import { Awakening, LifeSetupHero } from './Awakening.tsx'
 import { MemoryPanel, type MemoryActions } from './MemoryPanel.tsx'
@@ -30,7 +31,7 @@ import { mountRecords } from './records-resources.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap { genesis: GenesisKey }
-  interface ResourceProtocolMap { genesis: LifeStatus; 'genesis-agency': AgencyStatus }
+  interface ResourceProtocolMap { genesis: LifeStatus; 'genesis-agency': AgencyStatus; 'genesis-initiative': InitiativeStatus }
 }
 
 /** Required infrastructure, with no stable product import of the experimental namespace. */
@@ -44,7 +45,7 @@ export const inject = ['remote', 'slots', 'locale', 'resources', 'remote.credent
  */
 export async function mountStatus(ctx: Context, contribution: TypertRemoteContribution): Promise<() => Promise<void>> {
   const unmount = await ctx.remote.$mount(contribution)
-  const ui = ctx.inject(['remote.genesisStatus', 'remote.genesisAgency', 'remote.genesisMemory', 'remote.genesisRecords', 'slots', 'locale', 'resources', 'remote.credentials', 'sessions', 'uiWorkspace', 'configForms'], (scope) => {
+  const ui = ctx.inject(['remote.genesisStatus', 'remote.genesisAgency', 'remote.genesisInitiativeStatus', 'remote.genesisMemory', 'remote.genesisRecords', 'slots', 'locale', 'resources', 'remote.credentials', 'sessions', 'uiWorkspace', 'configForms'], (scope) => {
     scope.effect(() => scope.locale.register('genesis', { en, zh }))
     const resource = new StatusResource()
     scope.effect(() => scope.resources.register<'genesis'>({ protocol: 'genesis',
@@ -53,7 +54,17 @@ export async function mountStatus(ctx: Context, contribution: TypertRemoteContri
     scope.effect(() => scope.resources.register<'genesis-agency'>({ protocol: 'genesis-agency',
       open: (_address, { signal }) => resource.open(callerSignal => scope.remote.genesisAgency.inspect(callerSignal), signal),
     }))
+    scope.effect(() => scope.resources.register<'genesis-initiative'>({ protocol: 'genesis-initiative',
+      open: (_address, { signal }) => resource.open(callerSignal => scope.remote.genesisInitiativeStatus.inspect(callerSignal), signal),
+    }))
     scope.on('connection/reset', () => { resource.refresh() })
+    scope.slots.inject('settings.section', () => scope.slots.register({
+      name: 'settings.section', id: 'genesis-initiative', order: 21, locale: 'genesis',
+      label: () => scope.locale.bind('genesis')('initiativeTitle'), inject: (): InitiativeActions => ({
+        refresh: () => { resource.refresh() },
+        saveSettings: async (...args) => { try { return await scope.remote.genesisInitiativeStatus.saveSettings(...args) } finally { resource.refresh() } },
+      }),
+    }, InitiativePanel))
     scope.effect(() => {
       const refresh = () => { resource.refresh() }
       const dispose = [

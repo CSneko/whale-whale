@@ -63,6 +63,7 @@ it('edits persisted appraisal settings and validates recovery units before sendi
   const { props, saveSettings, status } = fixture()
   render(<EmotionPanel {...props} />)
   fireEvent.click(screen.getByRole('button', { name: en.emotionSettings }))
+  fireEvent.click(screen.getByRole('switch', { name: en.emotionOfflineChanges }))
   fireEvent.click(screen.getByRole('switch', { name: en.emotionAutomatic }))
   const sensitivity = screen.getByLabelText<HTMLInputElement>(en['emotionSetting.sensitivity'])
   expect(sensitivity.value).toBe('1')
@@ -70,6 +71,11 @@ it('edits persisted appraisal settings and validates recovery units before sendi
   fireEvent.click(screen.getByRole('button', { name: en.emotionSaveSettings }))
   expect(saveSettings).not.toHaveBeenCalled()
   fireEvent.change(sensitivity, { target: { value: '0.5' } })
+  fireEvent.change(screen.getByLabelText(en['emotionSetting.moodEmotionScale']), { target: { value: '0.4' } })
+  fireEvent.change(screen.getByLabelText(en['emotionSetting.emotionMoodInfluence']), { target: { value: '0.6' } })
+  fireEvent.click(screen.getByRole('button', { name: en.emotionSaveSettings }))
+  expect(saveSettings).not.toHaveBeenCalled()
+  fireEvent.change(screen.getByLabelText(en['emotionSetting.emotionMoodInfluence']), { target: { value: '0.3' } })
   fireEvent.change(screen.getByLabelText(en['emotionSetting.windowTurns']), { target: { value: '6' } })
   fireEvent.change(screen.getByLabelText('Happiness immediate half-life (minutes)'), { target: { value: '60' } })
   fireEvent.change(screen.getByLabelText('Valence mood half-life (hours)'), { target: { value: '0.5' } })
@@ -79,7 +85,8 @@ it('edits persisted appraisal settings and validates recovery units before sendi
   fireEvent.change(screen.getByLabelText('Valence mood half-life (hours)'), { target: { value: '2' } })
   fireEvent.click(screen.getByRole('button', { name: en.emotionSaveSettings }))
   await vi.waitFor(() => { expect(screen.queryByRole('dialog')).toBeNull() })
-  expect(saveSettings).toHaveBeenLastCalledWith({ ...status.emotion!.settings, sensitivity: 0.5, enabled: false, windowTurns: 6,
+  expect(saveSettings).toHaveBeenLastCalledWith({ ...status.emotion!.settings, offlineChanges: false, moodEmotionScale: 0.4,
+    emotionMoodInfluence: 0.3, sensitivity: 0.5, enabled: false, windowTurns: 6,
     shortHalfLifeMs: { ...status.emotion!.shortHalfLifeMs, happiness: 3600000 },
     moodHalfLifeMs: { ...status.emotion!.moodHalfLifeMs, valence: 7200000 } }, 4, expect.any(AbortSignal))
 })
