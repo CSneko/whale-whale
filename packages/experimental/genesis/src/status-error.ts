@@ -36,16 +36,26 @@ export function statusFailure(error: unknown): RemoteFailure {
       'relationshipDelta', 'affection', 'trust', 'attachment', 'familiarity', 'feltSecurity', 'label',
       'relationshipEnabled', 'maxRelationshipDelta', 'moodSupportTurns', 'importantEventThreshold', 'repetitionDiscount', 'maxNeedsDelta', 'needsHalfLifeMs', 'interactionHalfLifeMs', 'socialDesire', 'socialSatisfaction', 'relationshipQuality', 'recentInteraction', 'solitudePreference', 'exploration', 'autonomy', 'creativity', 'loneliness',
       'changes', 'action', 'sourceSeqs', 'memory', 'category', 'importance', 'confidence', 'attribution',
-      'motivations', 'goals', 'candidates', 'selected', 'factors', 'disposition', 'strength', 'status', 'origin', 'priority',
-      'interestIds', 'memoryIds', 'sourceEventIds', 'motivationIds', 'goalIds', 'nextAction', 'failures', 'createdAt', 'updatedAt',
-      'motivation', 'interest', 'commitment', 'benefit', 'cost', 'risk', 'urgency', 'relationship', 'context'])
+      'motivations', 'goals', 'candidates', 'selected', 'strength', 'status', 'interestIds', 'memoryIds', 'sourceEventIds',
+      'origin', 'motivationIds', 'priority', 'nextAction', 'failures', 'disposition', 'goalIds', 'factors', 'createdAt', 'updatedAt',
+      'motivation', 'interest', 'commitment', 'benefit', 'cost', 'risk', 'urgency', 'relationship', 'context',
+      'offlineChanges', 'moodEmotionScale', 'emotionMoodInfluence', 'clockCheckpointMs',
+      'enabled', 'sessionId', 'intervalMs', 'minSendIntervalMs', 'maxPer24Hours', 'userIdleMs', 'eventImportance', 'maxPending', 'maxPendingAgeMs'])
     message = error.issues.slice(0, 8).map((issue) => {
       const path = issue.path.filter(part => typeof part === 'number' || fields.has(String(part))).join('.') || 'configuration/response'
       const bound = 'minimum' in issue ? `; minimum=${String(issue.minimum)}` : 'maximum' in issue ? `; maximum=${String(issue.maximum)}` : ''
       const keys = issue.code === 'unrecognized_keys' ? issue.keys.filter(key => fields.has(key)).slice(0, 8) : []
-      return `${path}: ${issue.code}${bound}${keys.length ? `; fields=${keys.join(',')}` : ''}`
+      const unknown = issue.code === 'unrecognized_keys' ? issue.keys.length - keys.length : 0
+      const fieldsText = keys.length ? `; fields=${keys.join(',')}` : ''
+      const unknownText = issue.code === 'unrecognized_keys'
+        ? `${unknown > 0 ? `; unknown fields=${unknown}` : ''}; inspect the logged auxiliary response` : ''
+      return `${path}: ${issue.code}${bound}${fieldsText}${unknownText}`
     }).join('; ')
   } else if (error instanceof HarnessError) {
+    if (error.code === 'GENESIS_DELIBERATION_FAILED'
+      && (error.cause instanceof GenesisError || error.cause instanceof z.ZodError || error.cause instanceof SyntaxError)) {
+      return statusFailure(error.cause)
+    }
     reason = error.code
     message = ['MISSING_CREDENTIAL', 'INVALID_CREDENTIAL', 'NO_ADAPTER'].includes(error.code)
       ? error.message : `Model provider failed (${error.code}). Check the selected provider and its credentials.`

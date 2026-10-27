@@ -78,8 +78,8 @@ it('keeps sensitivity within per-exchange limits and preserves old anchors witho
   }
 })
 
-it('recovers short reactions and slower mood by elapsed time, with stable quantized context and backwards-clock containment', () => {
-  const config = Config({ leasePath: '/unused-emotion.lock', emotion: {} }).emotion!
+it('preserves independent legacy recovery when both coupling gains are zero, including backwards-clock containment', () => {
+  const config = Config({ leasePath: '/unused-emotion.lock', emotion: { moodEmotionScale: 0, emotionMoodInfluence: 0 } }).emotion!
   const initial = initialEmotion(config, '2026-10-24T00:00:00.000Z')
   initial.current.happiness = 0.9
   initial.mood.valence = 0.3
@@ -184,7 +184,8 @@ it('forms a sourced operator relationship, attenuates repeated support and gates
   const anchored = emotionAt(first.state.emotion!, new Date().toISOString())
   expect(anchored.relationship?.values.attachment).toBe(0.005)
   expect(anchored.relationship?.confidence.attachment).toBe(0.7)
-  expect(anchored.mood.valence).toBe(0.2)
+  expect(anchored.mood.valence).toBeCloseTo(0.2, 6)
+  expect(first.state.events.at(-1)?.payload['effects']).toMatchObject({ moodEligible: false })
   const repeated = await review(2, 'I will support your next attempt.')
   expect(emotionAt(repeated.state.emotion!, new Date().toISOString()).relationship).toEqual(anchored.relationship)
   expect(repeated.state.events.at(-1)?.payload['effects']).toMatchObject({ repeated: true, repetitionFactor: 0.5, moodEligible: false })
@@ -195,7 +196,8 @@ it('forms a sourced operator relationship, attenuates repeated support and gates
   expect(current.relationship?.id).toBe(anchored.relationship?.id)
   const later = emotionAt(current, new Date(Date.now() + 30 * 86400000).toISOString())
   expect(later.relationship).toEqual(current.relationship)
-  expect(later.current.tenderness).toBeLessThan(0.001)
+  expect(later.current.tenderness).toBeGreaterThan(0)
+  expect(later.current.tenderness).toBeLessThan(current.current.tenderness)
   const beforeReplay = await opened.core.snapshot()
   await opened.core.reviewEmotion(session, fourth.evidence, 0, fourth.update)
   expect((await opened.core.snapshot()).emotion).toEqual(beforeReplay.emotion)

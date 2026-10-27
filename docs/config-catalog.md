@@ -1066,7 +1066,7 @@ export type Config = CuaConfig
 
 - `inject`: `storageDomain` · `tools` · `systemPrompt` · `agents` · `llm` · `sessionProjections` · `sandboxPolicy`
 - `refs`: `z` (`zod`)
-- `source`: [`packages/experimental/genesis/src/config.ts:33`](../packages/experimental/genesis/src/config.ts)
+- `source`: [`packages/experimental/genesis/src/config.ts:35`](../packages/experimental/genesis/src/config.ts)
 
 ```ts config-catalog
 /** Validated, resolved Genesis plugin configuration. */
@@ -1134,6 +1134,8 @@ export interface PersonalityConfig {
 
 /** Optional proactive conversation policy; durations are milliseconds. */
 export interface SocialInitiativeConfig {
+  /** Permit new opportunities and pending delivery admission; saved operator settings override this default. */
+  enabled: boolean
   /** Explicit conversation; absent selects the latest live character conversation with real user activity. */
   sessionId?: string
   /** Period between decision opportunities while the process runs. */
@@ -1247,6 +1249,14 @@ export interface MemoryConfig {
 
 /** Bounded post-reply emotion appraisal and deterministic recovery. */
 export interface EmotionConfig {
+  /** Include stopped-process time in affect evolution; defaults to the existing wall-clock behavior. */
+  offlineChanges: boolean
+  /** Maximum mood-dependent immediate equilibrium intensity, from zero to one. */
+  moodEmotionScale: number
+  /** Fraction of slow mood's destination contributed by sustained immediate affect, at most one half. */
+  emotionMoodInfluence: number
+  /** Milliseconds between durable online-only clock checkpoints; crash recovery resumes at the last successful checkpoint. */
+  clockCheckpointMs: number
   /** Shared emotion recovery and appraisal multiplier, including relationship learning; zero freezes automatic changes. */
   sensitivity: number
   /** Maximum related and self memories supplied to each appraisal. */
@@ -1273,7 +1283,7 @@ export interface EmotionConfig {
   repetitionDiscount: number
   /** Completed exchanges considered per review, including the current exchange. */
   windowTurns: number
-  /** Initial mood and long-term recovery destination for each dimension. */
+  /** Initial mood and trait contribution to the long-term destination for each dimension. */
   baseline: Mood
   /** Per-field short reaction half-lives in milliseconds. */
   shortHalfLifeMs: EmotionHalfLives

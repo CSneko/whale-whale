@@ -158,6 +158,7 @@ export const stateSchema = z.strictObject({
   }
   const agency = state.agency
   const interactions = state.initiative?.records ?? []
+  if (state.initiative?.eventCursor !== undefined && !ids.has(state.initiative.eventCursor)) reject('Invalid initiative cursor')
   if (new Set(interactions.map(item => item.key)).size !== interactions.length
     || new Set(interactions.map(item => item.id)).size !== interactions.length) reject('Duplicate initiative opportunity')
   for (const item of interactions) {

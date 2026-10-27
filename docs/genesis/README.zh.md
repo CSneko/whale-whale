@@ -8,7 +8,7 @@ Genesis 在会话和模型之间保持同一生命身份，保存带来源的候
 
 ## 目录
 
-[首次唤醒](awakening.zh.md) · [记忆](memory.zh.md) · [情绪](emotion.zh.md) · [兴趣](interest.zh.md) · [动机与决策](motivation.zh.md) · [架构](architecture.zh.md) · [数据模型](data-model.zh.md) · [开发](development.zh.md) · [后续方向](roadmap.zh.md) · [文字记录](records.zh.md) · [远程访问](remote-access.zh.md)
+[首次唤醒](awakening.zh.md) · [记忆](memory.zh.md) · [情绪](emotion.zh.md) · [兴趣](interest.zh.md) · [动机与决策](motivation.zh.md) · [主动消息](social.zh.md) · [架构](architecture.zh.md) · [数据模型](data-model.zh.md) · [开发](development.zh.md) · [后续方向](roadmap.zh.md) · [文字记录](records.zh.md) · [远程访问](remote-access.zh.md)
 
 ## 从源码工作区运行
 
@@ -60,7 +60,7 @@ pnpm dsh --no-genesis web --patch packages/experimental/genesis/cordis.patch.yml
 
 ## 限制
 
-可选[情绪](emotion.zh.md)保存即时状态与较慢的心境，工作区生命覆盖配置默认启用。可选[兴趣](interest.zh.md)从带来源的交流形成，不预设喜欢的主题。可选[审议](motivation.zh.md)提供持久动机、跨会话目标和实际执行意愿检查；自主唤醒调度、反思与自我完善尚不可用。工具发现记录可用性，不代表掌握能力或已获权限。可选[记忆流水线](memory.zh.md)提供嵌入搜索和独立更新；自动插件安装和自主修改源码仍不可用。
+可选[情绪](emotion.zh.md)保存即时状态与较慢的心境，工作区生命覆盖配置默认启用。可选[兴趣](interest.zh.md)从带来源的交流形成，不预设喜欢的主题。可选[审议](motivation.zh.md)提供持久动机、跨会话目标和实际执行意愿检查；自主任务调度、反思与自我完善尚不可用。工具发现记录可用性，不代表掌握能力或已获权限。可选[记忆流水线](memory.zh.md)提供嵌入搜索和独立更新；自动插件安装和自主修改源码仍不可用。
 
 ## 开发说明
 
