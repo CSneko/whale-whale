@@ -14,6 +14,8 @@ Optional version-3 `EmotionState` separates nine-field `EmotionCurrent`, two-fie
 
 `AgencyState` is an optional versioned projection owning `LifeMotivation`, cross-Session `LifeGoal` and structured `LifeDecision`. `DeliberationPlan` validates model proposals, while `DeliberationCommit` retains trusted caller-selected evidence and revision. `LifeDeliberationEngine` owns request admission and trusted autonomous entry; `LifeCore` commits changes and confirms outcomes atomically. [Motivation and deliberation](../genesis/motivation.md) defines willingness, permissions, transitions and recovery.
 
+`genesis-task` attributes an assignment to its requesting Session, life-wide request id and input fingerprint. The `genesisTask` projection retains that attribution and the latest turn settlement with original result-event references; it never updates life memory. `LifeStatus.lifePreset` tells the browser which conversations participate in life operations. [Workspace tasks](../genesis/tasks.md) owns isolation, dispatch, deduplication and recovery.
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>

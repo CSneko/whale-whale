@@ -14,7 +14,7 @@ The core serializes read-modify-write operations and commits one complete state 
 
 ## Harness integration
 
-`agent/created` binds a real Session to the existing life. `system-prompt/assemble` and `agent/pre-step` refresh selected context and actual scoped tool declarations. The Harness logs the contributed system and runtime context normally. Native tool results follow the existing durable tool pipeline.
+`agent/created` binds a participating Life Session to the existing life. `system-prompt/assemble` and `agent/pre-step` refresh selected context and actual scoped tool declarations. The Harness logs the contributed system and runtime context normally. Native tool results follow the existing durable tool pipeline.
 
 `session/event` observes real user messages and tool results as metadata facts, identified by Session ID and sequence. It never republishes a Session event. Only the latest live user evidence and pending tool-call names are held in adapter memory; no deprecated synchronous historical Session readers are used.
 
@@ -22,7 +22,7 @@ Facts say what happened; memories contain attributed interpretations. Model outp
 
 The optional [memory pipeline](memory.md) serializes reviews across Sessions at `agent/turn-stopping`. Registered Harness adapters or explicit Jev/Chat Completions endpoints receive logged bounded inputs; embeddings use a separate endpoint. Review failure is contained and reported without failing the completed chat. GUI model and embedding preferences own separate versioned domains under the life lease. Optional [emotion appraisal](emotion.md) has a separate serialized decision/write workflow and a bounded replayable dialogue projection, sharing model routes and the atomic life owner. Teardown cancels/drains memory and emotion work, closes preferences and core storage, then releases the lease.
 
-The optional [awakening layer](awakening.md) applies its character prompt and learned-tool restriction only to the configured Life preset; all five Web presets share identity and memory. The browser creates the first Session through the existing Session API, then the life Gateway enqueues a source-tagged built-in greeting once. Turn projection state rejects nonblank targets. The life event records its canonical Session before admission; independent Sessions do not share transcript state.
+The optional [awakening layer](awakening.md) applies its character prompt and learned-tool restriction only to the configured Life preset; only Life conversations participate in identity, memory, affect and capability history; ordinary presets remain outside that lifecycle. The browser creates the first Session through the existing Session API, then the life Gateway enqueues a source-tagged built-in greeting once. Turn projection state rejects nonblank targets. The life event records its canonical Session before admission; independent Sessions do not share transcript state.
 
 Optional [deliberation](motivation.md) calls the independent writer at `agent/pre-step` and retains its committed choice as a source-tagged notice in the Session log. A monotonic tool guard restricts task execution according to the live decision; a trusted event entry uses the ordinary Agent inbox to continue life goals. Model text cannot complete a goal or expand permission. Cancellation and disposal drain accepted deliberation and result settlements before storage closes.
 

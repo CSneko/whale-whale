@@ -24,7 +24,7 @@ import { brandString } from '@deepseek-ai/dsh-brand'
 import type { LifeEvent } from '../src/model.ts'
 import type { MemoryId, MemoryOrganizationId, MemoryOrganizationRequest } from '../src/status-types.ts'
 import { createServer } from 'node:http'
-import { LlmAdapter, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import { LlmAdapter, LlmError, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import { LifeMemoryEngine } from '../src/memory.ts'
 import { LifeEmotionEngine, EMOTION_DECISION_PROMPT, EMOTION_QUESTION, EMOTION_CRITERIA } from '../src/emotion.ts'
 import { emotionUpdateSchema } from '../src/emotion-state.ts'
@@ -50,8 +50,8 @@ function genesisAuditRecord(event: SessionEvent) {
 }
 async function boot(root: string, enabled = true, memory?: MemoryConfig, awakening = false, credentials = false,
   presets = false, persisted = false, emotion: boolean | Partial<EmotionConfig> = false, personal = false,
-  records?: Partial<RecordsConfig>, interest = false,
-  deliberation = false, social: boolean | Partial<SocialInitiativeConfig> = false, personality?: Partial<PersonalityConfig>) {
+  records?: Partial<RecordsConfig>, interest = false, deliberation = false,
+  social: boolean | Partial<SocialInitiativeConfig> = false, personality?: Partial<PersonalityConfig>, taskServices = false) {
   const configPath = join(root, 'cordis.yml')
   await writeFile(configPath, [
     ...(credentials ? ["- name: '@deepseek-ai/dsh-credentials-local'", '  config:',
@@ -84,6 +84,10 @@ async function boot(root: string, enabled = true, memory?: MemoryConfig, awakeni
     ...(awakening ? [`    awakening: { provider: fixture, model: chat${presets ? ', lifePreset: life' : ''} }`] : []),
     ...(persisted ? ["- name: '@deepseek-ai/dsh-session-persistence-jsonl'", '  config:',
       `    root: ${JSON.stringify(join(root, 'sessions'))}`, '    compression: none'] : []),
+    ...(taskServices ? ["- name: '@deepseek-ai/dsh-workspace'",
+      "- name: '@deepseek-ai/dsh-user-approval'", '  config: { policy: ask }',
+      "- name: '@deepseek-ai/dsh-agent-default-model'", '  config: { provider: worker-fixture, model: worker }',
+      "- name: '@deepseek-ai/dsh-session-query-sqlite'", `  config: { path: ${JSON.stringify(join(root, 'query.sqlite'))} }`] : []),
     "- name: '@deepseek-ai/dsh-agent-loop'", '  config:', '    agents: []',
   ].join('\n') + '\n')
   const ctx = new Context()
@@ -1433,7 +1437,7 @@ it('uses the saved Jev protocol once per completed turn, writes with a separate 
 })
 
 
-it('shares one life and learned memories across all five presets while limiting newborn tools only in Life mode', async () => {
+it('keeps one life in Life mode and isolates all four ordinary presets from its tools, memory and prompts', async () => {
   const root = await directory()
   const embeddings = await embeddingFixture()
   const ctx = await boot(root, true, embeddings.config, true, false, true)
@@ -1456,9 +1460,11 @@ it('shares one life and learned memories across all five presets while limiting 
       expect(request.tools?.map(tool => tool.name)).toEqual(['genesis_recall', 'learn'])
       expect(JSON.stringify(request)).toContain('Let applicable tendencies influence event interpretation, choices and expression')
     } else {
-      expect(request.tools?.some(tool => tool.name === 'genesis_recall')).toBe(true)
+      expect((request.tools ?? []).some(tool => tool.name.startsWith('genesis_') || tool.name === 'learn')).toBe(false)
       expect(JSON.stringify(request)).not.toContain('innocence')
-      expect(JSON.stringify(request)).toContain('Use a gentle tone.')
+      expect(JSON.stringify(request.messages.filter(message => message.source.kind !== 'user'))).not.toContain('Use a gentle tone.')
+      expect(JSON.stringify(request)).not.toContain('Genesis maintains a persistent life')
+      expect((await ctx.genesis.snapshot()).sessions).not.toHaveProperty(agent.id)
     }
     expect((await ctx.genesis.snapshot()).identity).toEqual(identity)
   }
@@ -1469,6 +1475,140 @@ it('shares one life and learned memories across all five presets while limiting 
   const signal = new AbortController().signal
   for (let refresh = 0; refresh < 3; refresh += 1) await ctx.genesisStatus.inspect(signal)
   expect(await ctx.genesis.snapshot()).toEqual(final)
+})
+
+it('assigns isolated workspace tasks, reads real running and completed results, deduplicates and restores cold outcomes', async () => {
+  const root = await directory()
+  const embeddings = await embeddingFixture()
+  const memory = { ...embeddings.config, associationLimit: 0,
+    consolidation: { ...embeddings.config.consolidation, enabled: false } }
+  const first = await boot(root, true, memory, true, false, true, true, true, true, undefined, true, false, false, undefined, true)
+  await first.genesis.awaken('小芽')
+  const { agent: caller } = await first.agents.create({ sessionId: SessionId('task-caller'),
+    agentOptions: { provider: 'fixture', model: 'chat' }, setup: async (agentCtx) => { await first.agentPresets.mount(agentCtx) } })
+  expect(first.agentPresets.composedPreset(caller.ctx)).toBe('life')
+  const targetPath = join(root, 'worker-workspace')
+  await mkdir(targetPath)
+  const target = await first.workspaceRegistry.create(targetPath, 'Worker workspace')
+  const entered = Promise.withResolvers<undefined>()
+  const release = Promise.withResolvers<undefined>()
+  disposers.push(async () => { release.resolve(undefined) })
+  class HeldWorker extends ScriptedModel {
+    override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+      entered.resolve(undefined)
+      await release.promise
+      yield * super.stream(options)
+    }
+  }
+  const worker = new HeldWorker(['Work result: isolated 🌱'.repeat(30)])
+  const unregisterWorker = first.llm.registerAdapter(['worker-fixture'], worker)
+  const signal = new AbortController().signal
+  let call = 0
+  const execute = (args: object, agent = caller) => first.tools.execute({ name: 'genesis_tasks', arguments: args,
+    agent, signal, callId: ToolCallId(`task-call-${++call}`) })
+  const value = async (args: object) => {
+    const result = await execute(args)
+    if (result.isError) throw new Error(JSON.stringify(result.error))
+    return z.record(z.string(), z.json()).parse(result.value)
+  }
+  expect((await execute({ action: 'catalog' })).isError).toBe(true)
+  expect((await first.tools.execute({ name: 'learn', arguments: { name: 'genesis_tasks' }, agent: caller, signal, callId: ToolCallId('learn-tasks') })).isError).toBe(false)
+  for (const name of ['read', 'write']) {
+    expect((await first.tools.execute({ name: 'learn', arguments: { name }, agent: caller, signal, callId: ToolCallId(`learn-${name}`) })).isError).toBe(false)
+  }
+  expect(first.sandboxPolicy.resolve({ session: caller.session }).additionalWritableRoots).toContain(join(root, 'personal'))
+  const catalog = await value({ action: 'catalog' })
+  expect(catalog.default_mode).toBe('life')
+  expect(catalog.workspaces).toContainEqual({ id: target.id, path: target.path, title: target.title })
+  expect(JSON.stringify(catalog.modes)).not.toContain('"id":"life"')
+  const request = { action: 'create', workspace_id: target.id, mode: 'standard', request_id: 'isolated-work', prompt: 'Return only the assigned work result.' }
+  for (const invalid of [{ mode: 'life' }, { mode: 'missing' }, { workspace_id: 'missing' }]) {
+    expect((await execute({ ...request, ...invalid })).isError).toBe(true)
+  }
+  const baseline = await first.genesis.snapshot()
+  let created: Record<string, z.core.util.JSONType>
+  try {
+    created = await value(request)
+    await entered.promise
+    const running = await value({ action: 'inspect', task_id: created.task_id })
+    expect(running).toMatchObject({ state: 'running', result_complete: false, result: '', requested_by: caller.id })
+    const [retry1, retry2] = await Promise.all([value(request), value(request)])
+    expect(retry1).toMatchObject({ task_id: created.task_id, reused: true })
+    expect(retry2).toMatchObject({ task_id: created.task_id, reused: true })
+    expect((await execute({ ...request, prompt: 'A different assignment.' })).isError).toBe(true)
+    const id = SessionId(z.string().parse(created.task_id))
+    expect(target.sessionIds).toEqual([id])
+    expect(first.agents.get(id)!.session.header).toMatchObject({ cwd: target.path, agentPreset: 'standard', isSeeded: false })
+    expect((await execute(request, first.agents.get(id))).isError).toBe(true)
+    expect(first.sessionProjections.stateOf(first.agents.get(id)!.session, 'sandboxMode')).toBe('workspace-write')
+    expect(first.sandboxPolicy.resolve({ session: first.agents.get(id)!.session }).additionalWritableRoots).toBeUndefined()
+  } finally { release.resolve(undefined) }
+  const id = SessionId(z.string().parse(created!.task_id))
+  await first.agents.get(id)!.whenIdle()
+  expect(worker.requests).toHaveLength(1)
+  expect(JSON.stringify(worker.requests[0])).not.toContain('genesis_')
+  expect(JSON.stringify(worker.requests[0])).not.toContain('小芽')
+  expect(JSON.stringify(worker.requests[0])).not.toContain('Current simulated emotion')
+  expect(JSON.stringify(worker.requests[0]!.messages)).toContain(request.prompt)
+  expect(await first.genesis.snapshot()).toEqual(baseline)
+  const completed = await value({ action: 'inspect', task_id: id, result_chars: 20 })
+  expect(completed).toMatchObject({ state: 'completed', result_complete: true, next_offset: 20 })
+  expect(completed.result).toBe('Work result: isolated 🌱'.repeat(30).slice(0, 20))
+  expect((await value({ action: 'list', workspace_id: target.id })).tasks).toContainEqual({ task_id: id, mode: 'standard', live_state: 'idle', inspectable: true })
+  const reply = first.agents.get(id)!.session.ownEvents().find(event => event.type === 'assistant/message')!
+  if (reply.type !== 'assistant/message') throw new Error('Worker reply missing')
+  await expect(first.genesisMemory.generate(id, reply.data.message.id, 'declarative', signal)).rejects.toThrow('Only a Life conversation')
+  unregisterWorker()
+  class FailedWorker extends ScriptedModel {
+    override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+      if (options.model === 'worker') throw new LlmError('Worker credentials rejected.', 'AUTH', { status: 401 })
+      yield * super.stream(options)
+    }
+  }
+  first.llm.registerAdapter(['worker-fixture'], new FailedWorker([]))
+  caller.session.append('sandbox/mode', { mode: 'read-only' })
+  caller.session.append('approval/policy', { policy: 'never' })
+  const failed = await value({ ...request, request_id: 'failure-work' })
+  const failedId = SessionId(z.string().parse(failed.task_id))
+  expect(first.sessionProjections.stateOf(first.agents.get(failedId)!.session, 'sandboxMode')).toBe('read-only')
+  expect(first.approval.overrideOf(first.agents.get(failedId)!.session)).toBe('never')
+  await first.agents.get(failedId)!.whenIdle()
+  expect(await value({ action: 'inspect', task_id: failedId })).toMatchObject({ state: 'failed', result_complete: false,
+    failure: { code: 'AUTH', status: 401, message: 'Worker credentials rejected.' } })
+  const absentPath = join(root, 'unavailable-workspace')
+  await mkdir(absentPath)
+  const absent = await first.workspaceRegistry.create(absentPath)
+  await rm(absentPath, { recursive: true })
+  expect((await execute({ ...request, request_id: 'missing-directory', workspace_id: absent.id })).isError).toBe(true)
+  const orphanId = SessionId('orphaned-work')
+  const orphan = await first.agents.create({ sessionId: orphanId, meta: { cwd: target.path, agentPreset: 'life' },
+    setup: async (agentCtx) => { await first.agentPresets.mount(agentCtx, 'life') } })
+  await first.agentPresets.select(orphan.agent, 'standard')
+  await target.attachSession(orphanId)
+  await first.sessionPersistence.flush()
+  await orphan.dispose()
+  await first.fiber.dispose()
+
+  const second = await boot(root, true, memory, true, false, true, true, true, true, undefined, true, false, false, undefined, true)
+  const { agent: resumed } = await second.agents.create({ sessionId: SessionId('another-life-conversation'),
+    setup: async (agentCtx) => { await second.agentPresets.mount(agentCtx, 'life') } })
+  const inspectCold = await second.tools.execute({ name: 'genesis_tasks', arguments: { action: 'inspect', task_id: id, offset: 20, result_chars: 30 },
+    agent: resumed, signal, callId: ToolCallId('cold-inspection') })
+  expect(inspectCold.isError).toBe(false)
+  if (inspectCold.isError) throw new Error(JSON.stringify(inspectCold.error))
+  expect(inspectCold.value).toMatchObject({ state: 'completed', result: 'Work result: isolated 🌱'.repeat(30).slice(20, 50) })
+  expect(second.agents.get(id)).toBeUndefined()
+  for (const [taskId, state] of [[failedId, 'failed'], [orphanId, 'interrupted']] as const) {
+    const result = await second.tools.execute({ name: 'genesis_tasks', arguments: { action: 'inspect', task_id: taskId },
+      agent: resumed, signal, callId: ToolCallId(`inspect-${state}`) })
+    expect(result.isError).toBe(false)
+    if (result.isError) throw new Error(JSON.stringify(result.error))
+    expect(result.value).toMatchObject({ state, result_complete: false })
+    expect(second.agents.get(taskId)).toBeUndefined()
+  }
+  const fiber = [...second.loader.entries()].find(entry => entry.options.name === '@deepseek-ai/dsh-experimental-genesis')!.fiber!
+  await fiber.dispose()
+  expect(second.tools.get('genesis_tasks', resumed)).toBeUndefined()
 })
 
 it('accepts a Gemini-style single embedding without index and refuses incorrect explicit indices', async () => {

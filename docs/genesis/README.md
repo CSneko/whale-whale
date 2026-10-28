@@ -8,7 +8,7 @@ Keep one life identity across Sessions and models, retain sourced candidate memo
 
 ## Contents
 
-[First awakening](awakening.md) · [Memory](memory.md) · [Emotion](emotion.md) · [Interests](interest.md) · [Motivation and decisions](motivation.md) · [Proactive messages](social.md) · [Architecture](architecture.md) · [Data model](data-model.md) · [Development](development.md) · [Roadmap](roadmap.md) · [Writings](records.md) · [Remote access](remote-access.md)
+[First awakening](awakening.md) · [Memory](memory.md) · [Emotion](emotion.md) · [Interests](interest.md) · [Motivation and decisions](motivation.md) · [Proactive messages](social.md) · [Architecture](architecture.md) · [Data model](data-model.md) · [Development](development.md) · [Roadmap](roadmap.md) · [Writings](records.md) · [Remote access](remote-access.md) · [Workspace tasks](tasks.md)
 
 ## Run from this workspace
 

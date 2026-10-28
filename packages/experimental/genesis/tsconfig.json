@@ -55,6 +55,21 @@
     },
     {
       "path": "../../goal/goal"
+    },
+    {
+      "path": "../../workspace/workspace"
+    },
+    {
+      "path": "../../core/agent-default-model"
+    },
+    {
+      "path": "../../session/session-persistence"
+    },
+    {
+      "path": "../../session-query/session-query"
+    },
+    {
+      "path": "../../interaction/user-approval"
     }
   ]
 }

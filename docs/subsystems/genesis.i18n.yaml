@@ -3,5 +3,5 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/subsystems/genesis.md
 /genesis-life-services:
-  en: 2762648574b01c57
-  zh: c69d10ded4301061
+  en: 0f796a1ae3347c86
+  zh: 7c2be75494654d17

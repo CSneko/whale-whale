@@ -2,6 +2,7 @@
 import { Context } from '@deepseek-ai/cordis'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { MessageId } from '@deepseek-ai/dsh-llm'
 import type { MemoryId, LifeMemory, MemoryDraft, MemoryOrganizationRequest } from './status-types.ts'
 import type { MemoryKind } from './status-types.ts'
@@ -25,6 +26,7 @@ export class GenesisMemoryGateway extends TypertRemoteService {
   constructor(ctx: Context, private readonly options: {
     memory: LifeMemoryEngine | undefined
     config: Config
+    participates: (agent: Agent | undefined) => boolean
     consolidation?: MemoryConsolidator | undefined }) {
     super(ctx, 'genesisMemory')
     ctx.effect(() => async () => { this.lifetime.abort(); await Promise.allSettled(this.pending) })
@@ -49,6 +51,7 @@ export class GenesisMemoryGateway extends TypertRemoteService {
     return this.operation(signal, async (owned) => {
       const agent = this.ctx.agents.get(sessionId)
       if (agent === undefined) throw new GenesisError('invalid-state', 'Open the original conversation before generating memory.')
+      if (!this.options.participates(agent)) throw new GenesisError('invalid-source', 'Only a Life conversation can generate life memories.')
       const memory = this.options.memory
       if (memory === undefined) throw new GenesisError('invalid-state', 'Enable the memory pipeline and configure its writer and embedding service first.')
       await agent.whenIdle()

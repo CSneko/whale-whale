@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for tasks.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/genesis/tasks.md
+/life-and-workspace-tasks:
+  en: db7dc09eff7e15a7
+  zh: 03906dec0605e6fc
+/life-and-workspace-tasks/modes:
+  en: d4a7a048ea75d8a9
+  zh: d2a3c3ba9b590a90
+/life-and-workspace-tasks/assign-work:
+  en: f87283d1debba772
+  zh: 3a9c6e3dcdbfe8bf
+/life-and-workspace-tasks/human-inspection:
+  en: 15c8834e34326aa7
+  zh: 52af27eafec26b3b

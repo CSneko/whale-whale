@@ -212,10 +212,11 @@ resolve(request: SandboxPolicyRequest = {}): SandboxExecutionPolicy
 /**
  * Register one explicitly authorized host directory without widening read-only policy.
  * @param path - Existing absolute directory; its canonical identity is pinned until disposal.
- * @param enabled - Synchronous availability predicate, never authority from model or external data.
+ * @param enabled - Synchronous availability predicate for the requesting session (absent for agentless calls).
+ * Never authority from model or external data.
  * @returns Disposer withdrawing this grant from future resolutions; already-confined processes retain launch-time permissions until exit. Callers register it through their own effect scope.
  */
-registerWritableDirectory(path: string, enabled: () => boolean): () => void
+registerWritableDirectory(path: string, enabled: (session?: Session) => boolean): () => void
 
 /**
  * Read the session override without applying the deployment default.

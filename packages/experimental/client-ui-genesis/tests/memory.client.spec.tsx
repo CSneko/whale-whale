@@ -134,7 +134,10 @@ it('allocates a stable ID for a new draft and retains it when saving fails', asy
 it('offers explicit per-reply destinations and shows the actual generation error', async () => {
   const generate = vi.fn().mockResolvedValueOnce({ ok: false, error: new RemoteError('genesis/review', 'HTTP 429 from writer', { stage: 'writer', reason: 'model' }) })
     .mockResolvedValueOnce({ ok: true, value: true })
-  const props = { t, generate, messageId: 'reply-one' } as ComponentProps<typeof ManualMemory>
+  const props = { t, generate, messageId: 'reply-one', sessionId: 'life-session',
+    useResource: () => ({ value: { lifePreset: 'life' } }),
+    useSessions: (select: (state: unknown) => unknown) => select({ byId: { 'life-session': { projectionValues: { agentPreset: 'life' } } } }),
+  } as ComponentProps<typeof ManualMemory>
   render(<ManualMemory {...props} />)
   fireEvent.click(screen.getByRole('button', { name: en.manualMemory }))
   fireEvent.click(screen.getByRole('button', { name: en['kind.non-declarative'] }))
@@ -144,6 +147,11 @@ it('offers explicit per-reply destinations and shows the actual generation error
   await screen.findByRole('status')
   expect(generate).toHaveBeenLastCalledWith('reply-one', 'non-declarative', expect.any(AbortSignal))
   expect(screen.queryByRole('alert')).toBeNull()
+  cleanup()
+  render(<ManualMemory {...props} useSessions={((select: (state: unknown) => unknown) => select({
+    byId: { 'life-session': { projectionValues: { agentPreset: 'standard' } } },
+  })) as typeof props.useSessions} />)
+  expect(screen.queryByRole('button', { name: en.manualMemory })).toBeNull()
 })
 
 

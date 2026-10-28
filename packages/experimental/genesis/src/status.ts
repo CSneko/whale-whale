@@ -234,6 +234,7 @@ export class GenesisStatusGateway extends TypertRemoteService {
       if (status?.state !== 'failed') throw new GenesisError('invalid-state', 'No failed memory review is retained in this runtime. After a restart, continue the conversation to provide new evidence.')
       if (status.sessionId !== sessionId) throw new GenesisError('invalid-state', 'The latest failed review belongs to another conversation. Retry from its original conversation.')
       if (agent === undefined) throw new GenesisError('invalid-state', 'The original conversation is no longer active. Reopen it and continue chatting to provide new evidence.')
+      if (this.options.config.awakening !== undefined && !this.options.lifeMode(agent)) throw new GenesisError('invalid-source', 'Only Life conversations can update life memory.')
       await agent.whenIdle()
       await memory.retry(agent, status.turn, signal)
     })
@@ -333,7 +334,7 @@ export class GenesisStatusGateway extends TypertRemoteService {
   async inspect(signal: AbortSignal): Promise<LifeStatus> {
     return this.operation(signal, async (signal) => {
       signal.throwIfAborted()
-      const agents = this.ctx.agents.list()
+      const agents = this.ctx.agents.list().filter(agent => this.options.config.awakening === undefined || this.options.lifeMode(agent))
       for (const agent of agents) {
         signal.throwIfAborted()
         await this.ctx.genesis.scan(agent.session.id, this.ctx.tools.schemas(agent))
@@ -342,6 +343,7 @@ export class GenesisStatusGateway extends TypertRemoteService {
       const capabilities = agents.flatMap(agent => (state.sessions[agent.session.id] ?? [])
         .filter(capability => capability.available).map(capability => ({ sessionId: agent.session.id, capability })))
       const result: LifeStatus = {
+        ...(this.options.config.awakening?.lifePreset === undefined ? {} : { lifePreset: this.options.config.awakening.lifePreset }),
         identity: state.identity, sampledAt: new Date().toISOString(),
         operator: state.operator ?? { name: '', identity: '', revision: 0 },
         runtime: { platform: process.platform, node: process.versions.node, liveSessions: agents.length },
