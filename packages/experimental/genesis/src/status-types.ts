@@ -133,6 +133,8 @@ export interface PersonalityStatus {
 }
 /** A sampled view; historical Session observations never become current availability. */
 export interface LifeStatus {
+  /** Exclusive Life preset; absence retains the foundation all-Session policy. */
+  lifePreset?: string
   /** Explicit human-authored participant identity; zero revision denotes unset identity. */
   operator?: { name: string; identity: string; revision: number }
   /** Manual synthesis bounds; absent when auxiliary memory is disabled. */

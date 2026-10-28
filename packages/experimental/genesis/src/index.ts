@@ -39,6 +39,8 @@ import { writingsDomain } from './records-model.ts'
 import { prepareWritingRoot } from './records-files.ts'
 import { GenesisRecordsGateway } from './records-gateway.ts'
 import { registerWritingTool } from './records-tool.ts'
+import { installModeIsolation } from './mode.ts'
+import { registerTaskTool } from './tasks.ts'
 
 export { LifeDeliberationEngine } from './deliberation.ts'
 export { SocialInitiative } from './social.ts'
@@ -141,7 +143,11 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       return () => { lifetime.abort(); clearTimeout(timer) }
     })
   }
-  const personal = config.personalDirectory === undefined ? undefined : await preparePersonalDirectory(ctx, core, config.personalDirectory)
+  const lifeMode = (agent: Agent | undefined) => config.awakening !== undefined && (config.awakening.lifePreset === undefined
+    || (agent !== undefined && ctx.get('agentPresets')?.composedPreset(agent.ctx) === config.awakening.lifePreset))
+  const participates = (agent: Agent | undefined) => config.awakening === undefined || lifeMode(agent)
+  const personal = config.personalDirectory === undefined ? undefined : await preparePersonalDirectory(ctx, core, config.personalDirectory,
+    session => participates(session === undefined ? undefined : ctx.agents.get(session.id)))
   let records: WritingRecords | undefined
   if (config.records !== undefined && personal !== undefined) {
     const root = await prepareWritingRoot(personal)
@@ -156,8 +162,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   ctx.effect(() => () => preferences.close())
   const models = new ModelPreferences(await ctx.storageDomain.open(modelPreferencesDomain), config)
   ctx.effect(() => () => models.close())
-  const lifeMode = (agent: Agent | undefined) => config.awakening !== undefined && (config.awakening.lifePreset === undefined
-    || (agent !== undefined && ctx.get('agentPresets')?.composedPreset(agent.ctx) === config.awakening.lifePreset))
+  installModeIsolation(ctx, participates)
+  if (config.awakening?.lifePreset !== undefined) {
+    ctx.inject(['workspaceRegistry', 'agentPresets', 'agentDefaultModel', 'sessionPersistence', 'sessionQuery'], (child) => {
+      registerTaskTool(child, core, config, lifeMode)
+    })
+  }
   const deliberation = config.deliberation === undefined || config.memory === undefined ? undefined
     : new LifeDeliberationEngine(ctx, core, config, config.deliberation, config.memory, () => models.read().models,
       agent => config.awakening === undefined || lifeMode(agent))
@@ -193,6 +203,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   if (memory !== undefined) {
     ctx.effect(() => () => memory.close())
     ctx.on('agent/turn-stopping', async ({ agent, turn, signal }) => {
+      if (!participates(agent)) return
       try { await memory.review(agent, turn, signal) } catch (error) {
         ctx.logger.error(`Genesis memory review failed. A storage or backup failure may follow a committed update; inspect storage before retrying. Otherwise check model and embedding configuration. ${statusFailure(error).message}`)
         // Memory failures are reported separately; the completed chat reply remains successful.
@@ -207,6 +218,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     const engine = emotion
     ctx.effect(() => () => engine.close())
     ctx.on('agent/turn-stopping', async ({ agent, turn, signal }) => {
+      if (!participates(agent)) return
       try { await engine.review(agent, turn, signal) } catch (error) {
         ctx.logger.error(`Genesis emotion review failed. Model or validation failures retain the previous anchor. Storage or backup uncertainty stops dependent life operations and may follow a committed update; inspect storage before retrying. ${statusFailure(error).message}`)
       }
@@ -221,6 +233,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     const engine = interest
     ctx.effect(() => () => engine.close())
     ctx.on('agent/turn-stopping', async ({ agent, turn, signal }) => {
+      if (!participates(agent)) return
       try { await engine.review(agent, turn, signal) } catch (error) {
         ctx.logger.error(`Genesis interest review failed; prior interests remain. Inspect model configuration or life storage before retrying. ${statusFailure(error).message}`)
       }
@@ -228,14 +241,15 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }
   if (consolidation !== undefined) {
     ctx.effect(() => () => consolidation.close())
-    ctx.on('agent/status', ({ status }) => {
+    ctx.on('agent/status', ({ agent, status }) => {
+      if (!participates(agent)) return
       if (status === 'running') consolidation.activity()
       else consolidation.kick()
     }, { global: true })
     consolidation.kick()
   }
   ctx.effect(() => ctx.sessionProjections.register(manualMemoryProjection))
-  await ctx.plugin(GenesisMemoryGateway, { memory, config, consolidation })
+  await ctx.plugin(GenesisMemoryGateway, { memory, config, consolidation, participates })
   await ctx.plugin(GenesisAgencyGateway, { config, lifeMode })
   await ctx.plugin(GenesisInitiativeGateway, { config, engine: social,
     applies: (agent: Agent) => config.awakening === undefined || lifeMode(agent) })
@@ -243,6 +257,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const contexts = new Map<object, string>()
   const associations = new Map<object, string>()
   const refresh = async (agent: Agent) => {
+    if (!participates(agent)) { contexts.delete(agent); associations.delete(agent); return }
     await core.scan(agent.session.id, ctx.tools.schemas(agent))
     const agency = await agencyContext(core, config, false)
     contexts.set(agent, (await selfContext(core, agent, config, lifeMode(agent), associations.get(agent) ?? ''))
@@ -263,6 +278,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   ctx.systemPrompt.context({ name: 'genesis:self', order: 130, interpolate: false, required: true,
     text: ({ scope }) => scope === undefined ? '' : contexts.get(scope) ?? '' })
   ctx.on('agent/created', async ({ agent, source }) => {
+    if (!participates(agent)) return
     await core.bind(agent.session.id, source)
     await refresh(agent)
   }, { global: true })
@@ -280,6 +296,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       assembled.tools = assembled.tools.filter(tool => tool.name === LEARN_TOOL || tool.name === RECALL_TOOL || learned.includes(tool.name))
       assembled.contexts = assembled.contexts.filter(section => section.name === 'genesis:self')
     }
+    if (!participates(context.agent)) {
+      assembled.sections = assembled.sections.filter(section => !section.name.startsWith('genesis:'))
+      assembled.contexts = assembled.contexts.filter(section => !section.name.startsWith('genesis:'))
+    }
     if (context.agent !== undefined) {
       await refresh(context.agent)
       const section = assembled.contexts.find(candidate => candidate.name === 'genesis:self')
@@ -288,6 +308,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     return assembled
   }, { global: true })
   ctx.on('agent/pre-step', async ({ agent, signal }, next) => {
+    if (!participates(agent)) return next()
     if (lifeMode(agent) && !core.learningStatus().ready) {
       throw new GenesisError('invalid-state', 'Complete API configuration or account sign-in, then name this life before chatting.')
     }
@@ -319,6 +340,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     calls.delete(agent.session.id)
   }, { global: true })
   ctx.on('session/event', (session, event) => {
+    if (!participates(ctx.agents.get(session.id))) return
     if (social !== undefined && (event.type === 'assistant/message' || event.type === 'turn/end')) social.observe(session)
     deliberation?.observe(session.id, event)
     if (deliberation !== undefined && event.type === 'turn/end' && event.data.reason.kind !== 'completed') {
@@ -359,6 +381,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     })
   }, { global: true })
   for (const agent of ctx.agents.list()) {
+    if (!participates(agent)) continue
     await core.bind(agent.session.id, 'plugin-enabled')
     await refresh(agent)
   }

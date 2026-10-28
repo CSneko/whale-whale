@@ -9,7 +9,7 @@ English | [中文](guide.zh.md)
 
 ## Change
 
-The Genesis life overlay selects TypeSafe Jev decisions instead of the chat LLM. The Web companion adds Life mode and makes it the deployment default, while retaining existing saved preset choices. Newborn behavior and tool learning apply only to Life mode; the original four presets share identity and memory while retaining task behavior. Initialization is an explicit button action. Do not show again durably suppresses automatic credential reminders. After naming, the action opens the first conversation and triggers a source-tagged built-in greeting.
+The Genesis life overlay selects TypeSafe Jev decisions instead of the chat LLM. The Web companion adds Life mode and makes it the deployment default, while retaining existing saved preset choices. Newborn behavior and tool learning apply only to Life mode; the original four presets retain ordinary task behavior without life context or memory updates. Initialization is an explicit button action. Do not show again durably suppresses automatic credential reminders. After naming, the action opens the first conversation and triggers a source-tagged built-in greeting.
 
 ## Migration
 

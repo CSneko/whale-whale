@@ -123,7 +123,7 @@ export class SandboxPolicyService extends Service {
   readonly defaultMode: SandboxMode
   /** The absolute `workspace-write` fallback root for calls without a session cwd. */
   readonly workspaceRoot: string
-  private readonly writableDirectories = new Map<symbol, { path: string; device: number; inode: number; enabled: () => boolean }>()
+  private readonly writableDirectories = new Map<symbol, { path: string; device: number; inode: number; enabled: (session?: Session) => boolean }>()
   constructor(ctx: Context, config: Config) {
     super(ctx, 'sandboxPolicy')
     // schemastery (static Config) already filled `mode`; the cast records that
@@ -168,7 +168,7 @@ export class SandboxPolicyService extends Service {
     const mode = request.mode ?? (session === undefined ? undefined : this.overrideOf(session)) ?? this.defaultMode
     const additionalWritableRoots: string[] = []
     if (mode === 'workspace-write') for (const directory of this.writableDirectories.values()) {
-      if (!directory.enabled()) continue
+      if (!directory.enabled(session)) continue
       const current = statSync(directory.path)
       if (!current.isDirectory() || realpathSync.native(directory.path) !== directory.path
         || current.dev !== directory.device || current.ino !== directory.inode) {
@@ -187,10 +187,11 @@ export class SandboxPolicyService extends Service {
   /**
    * Register one explicitly authorized host directory without widening read-only policy.
    * @param path - Existing absolute directory; its canonical identity is pinned until disposal.
-   * @param enabled - Synchronous availability predicate, never authority from model or external data.
+   * @param enabled - Synchronous availability predicate for the requesting session (absent for agentless calls).
+   * Never authority from model or external data.
    * @returns Disposer withdrawing this grant from future resolutions; already-confined processes retain launch-time permissions until exit. Callers register it through their own effect scope.
    */
-  registerWritableDirectory(path: string, enabled: () => boolean): () => void {
+  registerWritableDirectory(path: string, enabled: (session?: Session) => boolean): () => void {
     resolveWorkspaceRoot(path)
     const canonical = realpathSync.native(path)
     const current = statSync(canonical)

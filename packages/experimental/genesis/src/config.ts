@@ -45,7 +45,7 @@ export interface Config {
     provider: string
     /** Chat model identifier on the configured provider. */
     model: string
-    /** Restrict newborn behavior to this preset; omitted preserves the legacy all-Session policy. */
+    /** Confine life tools, context and lifecycle to this preset; omitted preserves the legacy all-Session policy. */
     lifePreset?: string
   } | undefined
   /** Local atomic backup; omitted resolves beside leasePath as leasePath + '.backup.json'. */

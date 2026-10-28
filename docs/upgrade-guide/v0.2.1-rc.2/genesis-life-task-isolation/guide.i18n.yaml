@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.1-rc.2/genesis-life-task-isolation/guide.md
+/:
+  en: eefc541e02eb6d16
+  zh: 644309f6f80cd607
+/separate-life-from-ordinary-workspace-tasks:
+  en: 7ef26084a9ba9212
+  zh: ef80a1beda4599c9
+/separate-life-from-ordinary-workspace-tasks/change:
+  en: 43e19b7141d8b133
+  zh: 5b5614eeb636405b
+/separate-life-from-ordinary-workspace-tasks/migration:
+  en: 0ee80f9a8bd94241
+  zh: a0a9ca1314f1f567

@@ -19,7 +19,7 @@ export interface ManualMemoryActions {
  * @param props - Durable reply identity, localized copy and cancellable generation.
  * @returns A compact action and a dismissible modal retaining its selected layer and error.
  */
-export function ManualMemory({ messageId, generate, t }: PropsRuntime<'conversation.chat.assistant-actions'> &
+export function ManualMemory({ sessionId, messageId, generate, t, useResource, useSessions }: PropsRuntime<'conversation.chat.assistant-actions'> &
   PropsLocale<'genesis'> & InjectFace<ManualMemoryActions>) {
   const [open, setOpen] = useState(false)
   const [kind, setKind] = useState<MemoryKind>('declarative')
@@ -28,6 +28,9 @@ export function ManualMemory({ messageId, generate, t }: PropsRuntime<'conversat
   const [failure, setFailure] = useState<string>()
   const operation = useRef<AbortController>()
   useEffect(() => () => { operation.current?.abort() }, [])
+  const life = useResource<'genesis'>('dsh-resource://genesis/status').value
+  const preset = useSessions(state => state.byId[sessionId]?.projectionValues?.agentPreset)
+  if (life === undefined || (life.lifePreset !== undefined && preset !== life.lifePreset)) return null
   return <>
     <Button size="sm" variant="ghost" onClick={() => { setOpen(true) }}>
       {t(pending ? 'manualPending' : failure !== undefined ? 'manualFailedLabel' : outcome === 'manualSaved' ? 'manualSaved' : 'manualMemory')}

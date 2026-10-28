@@ -14,6 +14,8 @@
 
 `AgencyState` 是可选版本化投影，拥有 `LifeMotivation`、跨会话 `LifeGoal` 和结构化 `LifeDecision`。`DeliberationPlan` 校验模型提案，`DeliberationCommit` 保留可信调用方选择的证据与修订；`LifeDeliberationEngine` 提供输入审议和可信自主入口，`LifeCore` 原子提交并确认结果。意愿、权限、状态变化与恢复规则见[动机与审议](../genesis/motivation.zh.md)。
 
+`genesis-task` 将分配任务归属到发起会话、生命范围请求标识和输入指纹。`genesisTask` 投影保留该归属、最近轮次结果及原始结果事件引用，不更新生命记忆。`LifeStatus.lifePreset` 告知浏览器哪些会话参与生命操作。[工作区任务](../genesis/tasks.zh.md)定义隔离、分配、去重与恢复行为。
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>
